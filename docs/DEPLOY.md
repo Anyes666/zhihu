@@ -34,6 +34,62 @@ http://127.0.0.1:3000
 
 **仅配置凭据不会开启实时请求。** 还需明确设置 `API_LIVE_ENABLED=true`、各能力的 `API_*_DAILY_CALLS` 与 `API_*_TOTAL_CALLS`。模型还需批准每日/累计预留单位；0或缺失均拒绝新实时请求，缓存与经典模式仍可玩。完整字段见根目录 `.env.example` 与 [预算保护说明](API-BUDGET-PROTECTION-2026-09-13.md)。不要复制本地测试脚本中的放宽额度作为生产预算。
 
+## Sealos / 任意容器平台
+
+```dockerfile
+FROM node:24-alpine
+WORKDIR /app
+COPY . .
+ENV PORT=8080 HOST=0.0.0.0
+EXPOSE 8080
+CMD ["node", "server.mjs"]
+```
+
+镜像很小，没有 `npm install` 步骤。
+
+在平台的环境变量里配置 `ZHIHU_ACCESS_SECRET`，健康检查指向 `/api/health`（返回 `{"ok":true,...}`）。
+
+## 需要持久卷吗
+
+**开启实时 API 时必须持久化预算账本。** 将持久卷挂载到 `/app/data/budget`，或通过 `API_BUDGET_DB` 指向受控持久存储；不要在部署或重启时清空数据库、WAL和SHM。否则会丢失累计计数，不能再保证跨重启额度保护。
+
+`data/cache/` 是可选的接口响应缓存；丢失可能增加后续实际请求。游戏会话仍在内存，重启不保留游戏局。多实例不能各自创建独立账本后共享同一密钥，扩容前需要统一的原子预算存储。
+
+如果平台文件系统只读，缓存写入失败会通过 `/api/health` 中的 `capabilities.cacheWarning` 报告，内存缓存仍然工作；预算账本不可写时，则停止新的实时请求。
+
+## Cloudflare Workers
+
+当前实现用了 `node:http`、`node:fs`，不能直接跑在 Workers 上。要上 Workers 需要改造：
+
+1. 换成 `fetch` handler 形式
+2. 静态资源交给 Cloudflare Pages
+3. 会话状态换成 Durable Objects 或 KV
+4. 磁盘缓存换成适合的共享存储
+5. SQLite预算预留迁移到提供原子事务的共享服务，不能只用最终一致性的计数替代
+
+`lib/engine.mjs` 是纯逻辑，可以复用；会话、预算事务与部署适配仍需单独设计和验证，不是当前版本的形态。**推荐用支持 Node 运行时的平台。**
+
+## 验证部署成功
+
+```bash
+curl https://<你的域名>/api/health
+```
+
+期望返回：
+
+```json
+{"ok":true,"project":"echo-post","zhihu":"live","llm":"deepseek","letters":3,"sessions":0}
+```
+
+- `zhihu: "live"` 是历史兼容字段，仅表示配置存在；`"demo-fallback"` 表示未配置。实际请求是否成功应读取 `capabilities.hot/search/knowledge` 的 source、fetchedAt、stale、fallbackReason
+- `llm: "zhida"` 仅表示识别到直答配置，当前因最大输出限制未核实而规则降级；`"deepseek"` 为 DeepSeek 配置；`"openai"` 为兼容端点配置；`"none"` 走规则引擎
+
+这些是配置/最近请求状态，不保证下一次生成成功。打开游戏查看每张资料卡的实际来源。走完一局确认四个阶段都正常。
+
+## OAuth 说明
+
+本作**不要求**知乎账号 OAuth。当前只有可选登录预留入口，不发起真实授权、不处理Token交换、不访问个人关注或收藏。未配置或未授权时保持公共参考模式。未来真实OAuth需另行接入并登记公网HTTPS回调，不能把登录当作搜索额度切换。
+
 ## Sealos 安全部署补充（2026-09-13）
 
 - 本机 `kubeconfig.yaml` 是集群访问凭据，仅供本地部署工具读取；Git 与 Docker 构建必须排除。不要上传、截图或复制其内容到日志。
