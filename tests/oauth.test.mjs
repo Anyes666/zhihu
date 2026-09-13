@@ -1,69 +1,70 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createOAuth } from "../lib/oauth.mjs";
-
-function response() {
-  return { headers: {}, setHeader(k, v) { this.headers[k.toLowerCase()] = v; },
-    writeHead(status, headers = {}) { this.status = status; for (const [k, v] of Object.entries(headers)) this.setHeader(k, v); },
-    end(text = "") { this.text = text; } };
+const origin = "https://game.example";
+const env = { ZHIHU_OAUTH_APP_ID: "506", ZHIHU_OAUTH_APP_KEY: "mock-app-key-only", ZHIHU_OAUTH_REDIRECT_URI: origin + "/auth/callback", ZHIHU_ACCESS_SECRET: "mock-access-secret-only", ZHIHU_PERSONALIZATION_ENABLED: "true", ZHIHU_OAUTH_MAX_REQUESTS: "100" };
+function response() { return { headers: {}, setHeader(k,v){this.headers[k.toLowerCase()]=v;},writeHead(s,h={}){this.status=s;for(const [k,v] of Object.entries(h))this.setHeader(k,v);},end(t=""){this.text=t;} }; }
+const cookie = r => String(r.headers["set-cookie"] || "").split(";")[0];
+async function request(a,url,method="GET",c="",headers={}) { const res=response();assert.equal(await a.handle({url,method,headers:{host:"game.example",origin,cookie:c,...headers},socket:{remoteAddress:"127.0.0.1"}},res),true);return res; }
+function harness(extra={}) {
+ const calls=[];let mode="ok",time=Date.now();
+ const fetchImpl=async (url,options)=>{
+  calls.push({url:String(url),options});
+  if(mode==="timeout")throw new Error("private-upstream-message");
+  if(mode==="failed-token" && String(url).endsWith("/access_token"))return Response.json({code:404,data:{access_token:"mock-token",expires_in:3600}});
+  if(String(url).endsWith("/access_token"))return Response.json({access_token:"mock-oauth-token-only",expires_in:3600,token_type:"Bearer"});
+  if(String(url).endsWith("/user")) {
+   if(mode==="invalid-profile")return Response.json({code:404,data:"private-message"});
+   return new Response('{"uid":969570047710216200,"fullname":"测试玩家","avatar_path":"https://picx.zhimg.com/avatar.jpg","email":"private@example.com","phone_no":"private-phone"}');
+  }
+  if(mode==="expired")return Response.json({Code:20001,Message:"token is private"});
+  if(mode==="failed-data")return Response.json({Code:90001,Message:"private-error"});
+  if(mode==="empty")return Response.json({Code:0,Data:{Items:[]}});
+  return Response.json({Code:0,Data:{Items:[{Title:"工作沟通",Headline:"职场协作",Summary:"团队与同事",UrlToken:"12345"}]}});
+ };
+ const auth=createOAuth({env:{...env,...extra},fetchImpl,now:()=>time,timeoutMs:100});
+ return {auth,calls,setMode:m=>mode=m,advance:n=>time+=n};
 }
-async function request(auth, url, method = "GET") {
-  const res = response(); assert.equal(await auth.handle({ url, method, headers: {} }, res), true); return res;
-}
+async function start(h) { const r=await request(h.auth,"/api/auth/zhihu/login","POST");assert.equal(r.status,200);const u=new URL(JSON.parse(r.text).url);return {c:cookie(r),state:u.searchParams.get("state"),r,u}; }
+async function login(h) { const s=await start(h);const r=await request(h.auth,`/auth/callback?authorization_code=mock-code&state=${s.state}`,"GET",s.c);assert.equal(r.status,303);assert.equal(r.headers.location,"/?zhihu=success");return {c:cookie(r),pending:s.c,state:s.state}; }
 
-test("未配置 OAuth 时明确公共参考，不伪造已授权或个人额度", async () => {
-  const auth = createOAuth({ env: {} });
-  const res = await request(auth, "/api/auth/zhihu/status");
-  assert.equal(res.status, 200);
-  assert.deepEqual(JSON.parse(res.text), { configured: false, authenticated: false, profile: null,
-    mode: "public", personalized: false, reason: "not_configured", quotaMode: "shared" });
-  assert.equal(res.headers["cache-control"], "no-store");
-  assert.equal(res.headers["set-cookie"], undefined);
+test("未配置时保持公共模式且不创建身份 Cookie",async()=>{const a=createOAuth({env:{}});const r=await request(a,"/api/auth/zhihu/status");const s=JSON.parse(r.text);assert.equal(s.configured,false);assert.equal(s.authenticated,false);assert.equal(s.personalized,false);assert.equal(r.headers["set-cookie"],undefined);assert.equal((await request(a,"/api/auth/zhihu/login","POST")).status,503);});
+test("授权跳转绑定登记回调、一次性 state 和安全 Cookie，不带 App Key",async()=>{const h=harness();const {r,u,state}=await start(h);assert.equal(u.origin,"https://openapi.zhihu.com");assert.equal(u.pathname,"/authorize");assert.equal(u.searchParams.get("app_id"),"506");assert.equal(u.searchParams.get("redirect_uri"),origin+"/auth/callback");assert.ok(state.length>=32);for(const flag of ["HttpOnly","Secure","SameSite=Lax"])assert.ok(r.headers["set-cookie"].includes(flag));assert.ok(!r.text.includes(env.ZHIHU_OAUTH_APP_KEY));assert.equal(h.calls.length,0);});
+test("禁止跨站和无 Origin 发起授权；非法回调地址使配置不可用",async()=>{const h=harness();for(const o of ["https://evil.example",undefined])assert.equal((await request(h.auth,"/api/auth/zhihu/login","POST","",{origin:o})).status,403);assert.equal(h.calls.length,0);for(const uri of ["http://game.example/auth/callback","https://localhost/auth/callback","https://x:y@game.example/auth/callback",origin+"/auth/callback?next=evil"]){const a=harness({ZHIHU_OAUTH_REDIRECT_URI:uri});assert.equal(JSON.parse((await request(a.auth,"/api/auth/zhihu/status")).text).configured,false);}});
+test("回调交换 Token 并按正确鉴权读取基础信息；无损 ID 与敏感字段过滤",async()=>{const h=harness();const s=await login(h);assert.notEqual(s.c,s.pending);assert.equal(h.calls.length,2);const form=new URLSearchParams(h.calls[0].options.body);assert.equal(form.get("app_key"),env.ZHIHU_OAUTH_APP_KEY);assert.equal(form.get("grant_type"),"authorization_code");assert.equal(form.get("code"),"mock-code");assert.equal(form.get("redirect_uri"),origin+"/auth/callback");assert.equal(h.calls[1].options.headers.Authorization,"Bearer mock-oauth-token-only");assert.equal(h.calls[1].options.headers["X-OAuth-Token"],undefined);assert.equal(h.calls[1].options.redirect,"error");const r=await request(h.auth,"/api/auth/zhihu/status","GET",s.c);const d=JSON.parse(r.text);assert.equal(d.authenticated,true);assert.equal(d.profile.id,"969570047710216200");assert.equal(d.profile.name,"测试玩家");assert.equal(d.profile.avatarUrl,"https://picx.zhimg.com/avatar.jpg");assert.equal(d.personalized,false);for(const v of ["mock-oauth-token-only","private@example.com","private-phone",env.ZHIHU_OAUTH_APP_KEY,env.ZHIHU_ACCESS_SECRET])assert.ok(!r.text.includes(v));assert.equal(JSON.parse((await request(h.auth,"/api/auth/zhihu/status","GET",s.pending)).text).authenticated,false);});
+test("缺失/错误/重复 state 或 Cookie、取消授权均不调用上游",async()=>{for(const kind of ["missing-state","bad-state","no-cookie","duplicate","denied"]){const h=harness();const s=await start(h);const query=kind==="missing-state"?"authorization_code=secret-code":kind==="denied"?`error=access_denied&state=${s.state}`:`authorization_code=secret-code&state=${kind==="bad-state"?"wrong":s.state}${kind==="duplicate"?"&state=extra":""}`;const r=await request(h.auth,"/auth/callback?"+query,"GET",kind==="no-cookie"?"":s.c);assert.equal(r.status,303);assert.notEqual(r.headers.location,"/?zhihu=success");assert.ok(!r.headers.location.includes("secret-code"));assert.equal(h.calls.length,0);}});
+test("回调不可重放；pending 超时失效；退出与 Token 到期清理会话",async()=>{const h=harness();const s=await login(h);await request(h.auth,`/auth/callback?code=mock-code&state=${s.state}`,"GET",s.pending);assert.equal(h.calls.length,2);await request(h.auth,"/api/auth/zhihu/logout","POST",s.c);assert.equal(JSON.parse((await request(h.auth,"/api/auth/zhihu/status","GET",s.c)).text).authenticated,false);const other=await login(h);h.advance(3600001);assert.equal(JSON.parse((await request(h.auth,"/api/auth/zhihu/status","GET",other.c)).text).authenticated,false);const pending=await start(h);h.advance(300001);await request(h.auth,`/auth/callback?code=secret&state=${pending.state}`,"GET",pending.c);assert.equal(h.calls.length,4);});
+test("资料失败或网络异常不建立登录、不反射上游错误",async()=>{for(const mode of ["invalid-profile","timeout","failed-token"]){const h=harness();const s=await start(h);h.setMode(mode);const r=await request(h.auth,`/auth/callback?code=private-code&state=${s.state}`,"GET",s.c);assert.equal(r.headers.location,"/?zhihu=upstream_failed");assert.ok(!r.text.includes("private"));assert.equal(JSON.parse((await request(h.auth,"/api/auth/zhihu/status","GET",s.c)).text).authenticated,false);}});
+test("个性化必须主动 POST，五项接口最多各一条、带用户 Token，结果仅给引导摘要",async()=>{const h=harness();const s=await login(h);assert.equal(h.calls.length,2);assert.equal((await request(h.auth,"/api/auth/zhihu/personalization","POST")).status,401);const r=await request(h.auth,"/api/auth/zhihu/personalization","POST",s.c);assert.equal(r.status,200);const d=JSON.parse(r.text);assert.equal(d.guidance.source,"authorized-context");assert.equal(d.guidance.recommendations[0].letterId,"colleague");assert.equal(d.guidance.checks.length,5);assert.equal(h.calls.length,7);for(const c of h.calls.slice(2)){assert.equal(new URL(c.url).searchParams.get("Limit"),"1");assert.equal(c.options.headers.Authorization,"Bearer "+env.ZHIHU_ACCESS_SECRET);assert.equal(c.options.headers["X-OAuth-Token"],"mock-oauth-token-only");assert.equal(c.options.redirect,"error");}assert.ok(!r.text.includes("团队与同事"));assert.ok(!r.text.includes("12345"));await request(h.auth,"/api/auth/zhihu/personalization","POST",s.c);assert.equal(h.calls.length,7);});
+test("个人数据鉴权失败停止后续请求，不回退读取开发者账号",async()=>{const h=harness();const s=await login(h);h.setMode("expired");const r=await request(h.auth,"/api/auth/zhihu/personalization","POST",s.c);assert.equal(r.status,401);assert.equal(h.calls.length,3);assert.equal(JSON.parse((await request(h.auth,"/api/auth/zhihu/status","GET",s.c)).text).authenticated,false);});
+test("空资料、上游失败与未开启个性化均诚实降级",async()=>{for(const mode of ["empty","failed-data"]){const h=harness();const s=await login(h);h.setMode(mode);const r=await request(h.auth,"/api/auth/zhihu/personalization","POST",s.c);const d=JSON.parse(r.text);assert.equal(d.guidance.source,"public");assert.equal(d.guidance.recommendations.length,0);assert.equal(d.guidance.checks.length,5);}const h=harness({ZHIHU_PERSONALIZATION_ENABLED:"false"});const s=await login(h);assert.equal((await request(h.auth,"/api/auth/zhihu/personalization","POST",s.c)).status,503);assert.equal(h.calls.length,2);});
+test("上游调用预算封顶，登录突发限速，其他游戏路由不受影响",async()=>{const h=harness({ZHIHU_OAUTH_MAX_REQUESTS:"2"});const s=await login(h);await request(h.auth,"/api/auth/zhihu/personalization","POST",s.c);assert.equal(h.calls.length,2);const a=harness();for(let n=0;n<5;n++)await start(a);assert.equal((await request(a.auth,"/api/auth/zhihu/login","POST")).status,429);assert.equal(await a.auth.handle({url:"/api/letters",method:"GET"},response()),false);assert.equal((await request(a.auth,"/api/auth/zhihu/login")).status,405);});
+
+test("unicode state cannot throw or exchange credentials",async()=>{const h=harness();const s=await start(h);const r=await request(h.auth,`/auth/callback?code=mock&state=${"界".repeat(64)}`,"GET",s.c);assert.equal(r.headers.location,"/?zhihu=state_invalid");assert.equal(h.calls.length,0);});
+test("rejected upstream body is cancelled without reading personal content",async()=>{let cancelled=false;const auth=createOAuth({env,fetchImpl:async()=>new Response(new ReadableStream({cancel(){cancelled=true;}}),{headers:{"Content-Length":"300000"}})});const s=await start({auth});const r=await request(auth,`/auth/callback?code=mock&state=${s.state}`,"GET",s.c);assert.equal(r.headers.location,"/?zhihu=upstream_failed");assert.equal(cancelled,true);});
+
+test("real HTTP roundtrip rotates cookie, blocks replay and clears login on logout",async()=>{
+ const {createServer,request:send}=await import("node:http"); const h=harness();
+ const server=createServer((req,res)=>{h.auth.handle(req,res).catch(()=>{res.statusCode=500;res.end();});});
+ await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));const base=`http://127.0.0.1:${server.address().port}`;
+ const http=(path,method="GET",cookie="")=>new Promise((resolve,reject)=>{
+  const req=send(base+path,{method,headers:{Host:"game.example",Origin:origin,Cookie:cookie}},res=>{let raw="";res.setEncoding("utf8");res.on("data",c=>raw+=c);res.on("end",()=>resolve({status:res.statusCode,headers:{get:name=>Array.isArray(res.headers[name])?res.headers[name][0]:res.headers[name]},json:async()=>JSON.parse(raw)}));});req.on("error",reject);req.end();
+ });
+ try {
+  const start=await http("/api/auth/zhihu/login","POST"); assert.equal(start.status,200);const pending=start.headers.get("set-cookie").split(";")[0], state=new URL((await start.json()).url).searchParams.get("state");
+  const callback=await http(`/auth/callback?authorization_code=mock-code&state=${state}`,"GET",pending);assert.equal(callback.status,303);assert.equal(callback.headers.get("location"),"/?zhihu=success");
+  const cookie=callback.headers.get("set-cookie").split(";")[0];assert.notEqual(cookie,pending);const status=await http("/api/auth/zhihu/status","GET",cookie);assert.equal((await status.json()).authenticated,true);
+  await http(`/auth/callback?code=mock-code&state=${state}`,"GET",pending);assert.equal(h.calls.length,2);
+  assert.equal((await http("/api/auth/zhihu/logout","POST",cookie)).status,200);assert.equal((await(await http("/api/auth/zhihu/status","GET",cookie)).json()).authenticated,false);
+ } finally {await new Promise(resolve=>server.close(resolve));}
+});
+test("logout cancels authority for pending callback and parallel callbacks exchange only once",async()=>{
+ let release,calls=0;const gate=new Promise(resolve=>{release=resolve;});
+ const auth=createOAuth({env,fetchImpl:async(url)=>{calls++;if(url.endsWith("/access_token")){await gate;return Response.json({access_token:"mock",expires_in:3600});}return Response.json({uid:123});}});
+ const s=await start({auth}), path=`/auth/callback?code=mock&state=${s.state}`;
+ const first=request(auth,path,"GET",s.c);const second=await request(auth,path,"GET",s.c);assert.equal(second.headers.location,"/?zhihu=state_invalid");assert.equal(calls,1);
+ await request(auth,"/api/auth/zhihu/logout","POST",s.c);release();assert.equal((await first).headers.location,"/?zhihu=upstream_failed");assert.equal(JSON.parse((await request(auth,"/api/auth/zhihu/status","GET",s.c)).text).authenticated,false);
 });
 
-test("即使存在 App 配置也等待后续接入，不发起授权或返回密钥", async () => {
-  const auth = createOAuth({ env: { ZHIHU_OAUTH_APP_ID: "private-app-id", ZHIHU_OAUTH_APP_KEY: "private-app-key",
-    ZHIHU_OAUTH_REDIRECT_URI: "https://registered.example/callback" } });
-  const res = await request(auth, "/api/auth/zhihu/status");
-  const data = JSON.parse(res.text);
-  assert.equal(data.configured, true); assert.equal(data.reason, "authorization_pending");
-  assert.equal(data.authenticated, false); assert.equal(data.personalized, false);
-  assert.equal(data.mode, "public"); assert.equal(data.quotaMode, "shared");
-  assert.ok(!res.text.includes("private-app")); assert.ok(!res.text.includes("registered.example"));
-});
-
-test("未授权/登录不可用自动返回公共模式，无第三方跳转", async () => {
-  const auth = createOAuth({ env: {} });
-  const res = await request(auth, "/api/auth/zhihu/login", "POST");
-  assert.equal(res.status, 503);
-  assert.equal(JSON.parse(res.text).mode, "public");
-  assert.equal(JSON.parse(res.text).error, "authorization_unavailable");
-  assert.equal(res.headers.location, undefined); assert.equal(res.headers["set-cookie"], undefined);
-});
-
-test("不接收真实回调；授权码、state 和错误文本不会被反射到响应", async () => {
-  const auth = createOAuth({ env: {} });
-  const res = await request(auth, "/api/auth/zhihu/callback?authorization_code=secret-code&state=secret-state&error=private-error");
-  assert.equal(res.status, 404); assert.equal(JSON.parse(res.text).mode, "public");
-  for (const text of ["secret-code", "secret-state", "private-error"]) assert.ok(!res.text.includes(text));
-  assert.equal(res.headers["referrer-policy"], "no-referrer");
-});
-
-test("预留接口严格限制方法且不影响其他游戏路由", async () => {
-  const auth = createOAuth({ env: {} });
-  assert.equal((await request(auth, "/api/auth/zhihu/login")).status, 405);
-  assert.equal((await request(auth, "/api/auth/zhihu/status", "POST")).status, 405);
-  assert.equal(await auth.handle({ url: "/api/letters", method: "GET" }, response()), false);
-});
-
-// Pure presentation contract: server errors and unsupported identity states never claim personalization.
-import { authMessage } from "../public/auth.js";
-test("未配置/未授权/授权失败的界面说明均回退公共模式", () => {
-  assert.match(authMessage({ configured: false }), /OAuth 尚未配置.*公共参考模式/);
-  assert.match(authMessage({ configured: true, authenticated: false }), /尚未获得知乎授权.*公共参考模式/);
-  for (const reason of ["upstream_failed", "state_invalid", "authorization_incomplete", "authorization_failed", "access_denied"])
-    assert.match(authMessage({ configured: true, reason }), /已回退到公共参考模式/);
-  assert.match(authMessage({ configured: true, authenticated: true }), /个性化参考尚未启用/);
-  assert.throws(() => authMessage({}), /invalid_status/);
-  assert.ok(!authMessage({ configured: true, reason: "private-error" }).includes("private-error"));
-});
+test("token expiry does not restart after a slow profile response",async()=>{let time=10000;const auth=createOAuth({env,now:()=>time,fetchImpl:async url=>{if(url.endsWith("/access_token"))return Response.json({access_token:"mock",expires_in:1});time+=2000;return Response.json({uid:123});}});const s=await start({auth});const r=await request(auth,`/auth/callback?code=mock&state=${s.state}`,"GET",s.c);assert.equal(r.headers.location,"/?zhihu=upstream_failed");});
+test("timeout aborts both headers and stalled body and releases concurrency",async()=>{for(const mode of ["headers","body"]){let aborted=0;const auth=createOAuth({env,timeoutMs:10,fetchImpl:async(url,{signal})=>{if(mode==="headers")return new Promise((resolve,reject)=>signal.addEventListener("abort",()=>{aborted++;reject(new Error("mock abort"));},{once:true}));return new Response(new ReadableStream({start(ctrl){signal.addEventListener("abort",()=>{aborted++;ctrl.error(new Error("mock abort"));},{once:true});}}));}});for(let i=0;i<4;i++){const s=await start({auth});const r=await request(auth,`/auth/callback?code=mock&state=${s.state}`,"GET",s.c);assert.equal(r.headers.location,"/?zhihu=upstream_failed");}assert.equal(aborted,4);}});

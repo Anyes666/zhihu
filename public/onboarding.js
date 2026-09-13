@@ -15,7 +15,7 @@ export function guideStep(c, s) {
   if (s.status !== 'active' || c.busy) return null;
   const seen = id => s.seen.includes(id);
   switch (c.view) {
-    case 'home': return step('home', '#start-shift', '选一个你愿意认真听的人', '点击「接过第一封信」，也可以往下挑另一封。没有必须选择的故事。', null, '启程');
+    case 'home': if (!seen('introduction')) return step('introduction', '#game-intro-content', '先花半分钟，了解这间邮局', '已为你展开页面底部的游戏介绍。你将拆信、寻声、落笔、读回响；先了解玩法，再挑一封信。登录和查资料都可选。', '了解了，去选一封信', '启程 · 游戏介绍'); return step('home', '#start-shift', '选一个你愿意认真听的人', '点击「接过第一封信」，也可以往下挑另一封。没有必须选择的故事。', null, '启程');
     case 'read': return seen('read')
       ? step('read-next', '#go-sort', '读完后，开始拆信', '先不用决定该劝他做什么。下一步只分清：发生了什么，和他怎么看这件事。', null, '1 / 4 · 拆信')
       : step('read', '.read .paper h2', '先把这封信读完', '留意一句让你在意的话：它是在描述事实，还是在表达害怕？你现在的第一反应，也可以等到结尾再看一眼。', '读好了，下一步', '1 / 4 · 拆信');
@@ -74,6 +74,7 @@ export function mountGuide() {
     const compact = mobile && height < 680; card.classList.toggle('guide-compact', compact);
     $('#guide-text').textContent = compact && current?.id === 'sort-place' ? '点选合适的分类；所有六类都可选。可收起提示查看原句。' : current?.text || '';
     const cardHeight = card.offsetHeight;
+    document.documentElement.style.setProperty('--guide-viewport-height', `${height}px`);
     document.documentElement.style.setProperty('--guide-space', mobile ? `${cardHeight + 28}px` : '0px');
     card.style.left = mobile ? '12px' : `${Math.max(12, width - card.offsetWidth - 24)}px`;
     card.style.top = `${offsetY + Math.max(12, height - cardHeight - (mobile ? 12 : 24))}px`;
@@ -94,9 +95,11 @@ export function mountGuide() {
   function render() {
     const next = guideStep(context,state);
     help.textContent = state.status === 'active' || state.status === 'new' ? '继续指引' : '新手指引';
+    if (document.querySelector('#zhihu-dialog')?.open) { clear(); help.hidden = true; return; }
     if (!next || collapsed || (next.id === 'write' && state.seen.includes('write'))) { current = next; clear(); return; }
     const changed = current?.id !== next.id || card.hidden;
     current = next;
+    if (next.id === 'introduction') { const intro = document.querySelector('#game-intro'); if (intro) intro.open = true; }
     if (changed) previousFocus = document.activeElement;
     card.hidden = false; help.hidden = true; document.body.classList.add('guide-visible'); card.dataset.step = next.id;
     $('#guide-chapter').textContent = next.chapter;
@@ -110,6 +113,7 @@ export function mountGuide() {
   $('#guide-next').onclick = () => {
     if (!current) return;
     if (current.id === 'welcome') state.status = 'active';
+    else if (current.id === 'introduction') { state.seen = [...new Set([...state.seen, 'introduction'])]; const intro = document.querySelector('#game-intro'); if (intro) intro.open = false; }
     else if (current.id === 'reflection') { state.status = 'complete'; $('#guide-announcement').textContent = '首次值班引导已完成。可以继续复盘或再接一封信。'; }
     else state.seen = [...new Set([...state.seen, current.id === 'sources' ? 'research' : current.id])];
     persist(); render();
@@ -118,6 +122,7 @@ export function mountGuide() {
   const collapse = () => { collapsed = true; clear(); help.textContent = '继续指引'; help.focus({preventScroll:true}); };
   $('#guide-collapse').onclick = collapse;
   help.onclick = () => { previousFocus = document.activeElement; collapsed = false; if (state.status !== 'active' && state.status !== 'new') state = {...fresh(),status:'active',sid:context.sid || null}; state.seen = state.seen.filter(id => id !== 'write'); persist(); render(); if (!card.hidden) $('#guide-title').focus({preventScroll:true}); };
+  document.addEventListener('echo:auth-modal', render);
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && !card.hidden) { event.preventDefault(); collapse(); } });
   window.addEventListener('resize', () => position(true)); window.addEventListener('scroll', () => position(), {passive:true});
   window.visualViewport?.addEventListener('resize', () => position()); window.visualViewport?.addEventListener('scroll', () => position());

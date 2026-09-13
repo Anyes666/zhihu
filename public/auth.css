@@ -18,3 +18,5 @@
 .auth-dialog-top{display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;top:0;background:#102330;z-index:1}
 .auth-dialog-top button{background:transparent;border:0;color:#bed1d5;min-height:36px;padding:5px 8px;cursor:pointer}
 #zhihu-auth-title:focus{outline:none}
+
+.auth-identity{display:flex;align-items:center;gap:12px;margin:16px 0}.auth-identity[hidden],.auth-guidance[hidden]{display:none}.auth-identity img{width:42px;height:42px;border-radius:50%;object-fit:cover}.auth-guidance{border-top:1px solid #557785;padding-top:12px}.auth-guidance h3{font:20px/1.5 var(--serif);color:#edd7b2}.auth-guidance article{padding:10px 12px;margin:8px 0;background:#16303b;border-radius:8px}.auth-guidance article b{color:#efc787}.auth-guidance small{display:block;color:#aabdc6;line-height:1.8}.auth-dialog button:disabled{opacity:.5;cursor:not-allowed}.auth-dialog .auth-actions [hidden]{display:none}

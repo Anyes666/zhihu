@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 const ROOT = process.cwd(), sleep = ms => new Promise(r => setTimeout(r, ms));
 const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.on("error", reject); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 const temp = await mkdtemp(path.join(tmpdir(), "echo-research-browser-"));
-const output = path.join(ROOT, "artifacts", "onboarding"); await mkdir(output, { recursive: true });
+const output = path.resolve(process.env.AUDIT_OUTPUT || path.join(ROOT, "artifacts", "oauth-integration-2026-09-13", "onboarding")); await mkdir(output, { recursive: true });
 const port = await freePort(), debug = await freePort(), base = `http://127.0.0.1:${port}`;
 const report = { at: new Date().toISOString(), steps: [], checks: {}, errors: [], llm: "none", authenticatedZhihu: false };
 let captureFailure, ws, server, chrome, currentStep = "startup";
@@ -69,7 +69,7 @@ try {
   await click('#guide-skip'); assert.equal(await hidden(),true); assert.equal((await guideState()).status,'skipped');
   await call('Page.reload'); await waitFor('document.querySelector("#start-shift")'); assert.equal(await hidden(),true);
   step('重开引导 / Escape收起与键盘恢复 / 不创建会话');
-  await evaluate('localStorage.removeItem("echo.guide.v1")'); await call('Page.reload'); await guided('welcome'); await click('#guide-next'); await guided('home');
+  await evaluate('localStorage.removeItem("echo.guide.v1")'); await call('Page.reload'); await guided('welcome'); await click('#guide-next'); await guided('introduction'); await inspect('01b-introduction-mobile'); await viewport(320,568,true); await inspect('01c-introduction-short-mobile'); await evaluate('document.querySelector("#game-intro-content").scrollTop=10000'); assert.equal(await evaluate('(()=>{const e=document.querySelector("#game-intro-content");return Math.abs(e.scrollHeight-e.clientHeight-e.scrollTop)<2})()'),true); await viewport(390,844,true); assert.equal(await evaluate('document.querySelector("#game-intro").open'),true); await click('#guide-next'); await guided('home');
   await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
   await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
   assert.equal(await hidden(),true); assert.equal(await evaluate('document.activeElement.id'),'guide-help');

@@ -37,3 +37,12 @@ test('回顾只使用本局事实、转义用户内容，风险句不当金句�
   assert.ok(html.includes('第二层')); assert.ok(html.includes('未说出的担心'));
   assert.ok(reflectionMarkup({talks:[],truthsUnlocked:[]},{missed:[]}).includes('没有向角色追问'));
 });
+
+
+test('引导先看介绍，再选信；介绍已读和中途恢复不重复打断', () => {
+  const state = { status: 'active', seen: [] };
+  assert.equal(guideStep({ view: 'home' }, state).id, 'introduction');
+  assert.equal(guideStep({ view: 'home' }, state).target, '#game-intro-content');
+  assert.equal(guideStep({ view: 'home' }, { ...state, seen: ['introduction'] }).id, 'home');
+  assert.equal(guideStep({ view: 'talk', summoned: 0 }, state).id, 'cast');
+});

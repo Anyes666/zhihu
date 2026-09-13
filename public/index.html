@@ -32,27 +32,49 @@
   <span id="zhihu-mode">当前使用公共参考模式</span>
 </aside>
 <dialog id="zhihu-dialog" class="auth-dialog" aria-labelledby="zhihu-auth-title" aria-describedby="zhihu-auth-description">
-  <div class="auth-dialog-top"><span class="auth-eyebrow">知乎身份 · 预留入口</span><button type="button" id="zhihu-close" aria-label="关闭，继续公共参考模式">关闭 ×</button></div>
+  <div class="auth-dialog-top"><span class="auth-eyebrow">知乎账号 · 可选登录</span><button type="button" id="zhihu-close" aria-label="关闭，继续公共参考模式">关闭 ×</button></div>
   <h2 id="zhihu-auth-title" tabindex="-1" autofocus>参考可以更贴近你，<br>判断仍由你自己做。</h2>
-  <p id="zhihu-auth-description">计划在你主动授权后，结合你的关注与收藏提供更贴近兴趣的参考。<strong>个性化参考尚未启用，暂不发起真实授权。</strong></p>
+  <p id="zhihu-auth-description">登录后显示你的昵称和头像。你还可以主动选择读取少量已授权资料，获取选信与提问建议。<strong>登录不是必选项，不改变剧情、评分或游戏进度。</strong></p>
   <div class="auth-state" role="status" aria-live="polite">
-    <b>当前使用公共参考模式</b>
+    <b id="zhihu-auth-heading">当前使用公共参考模式</b>
     <p id="zhihu-auth-detail">正在检查入口状态；无需等待，可以继续游戏。</p>
   </div>
   <ul class="auth-boundaries">
     <li>不登录也能体验完整故事、角色互动和知乎参考台。</li>
     <li>登录不等于切换搜索额度。搜索、热榜仍使用邮局公共凭证与缓存。</li>
-    <li>本阶段不读取你的关注与收藏，不向知乎发布内容，也不要求你填写 API 密钥。</li>
+    <li>只有你点击「生成个性化引导」后，才最小读取关注、收藏或创作摘要；不会发布内容，不需要你填写 API 密钥。</li><li>个性化建议由主题匹配生成，不会把个人资料发送给 AI 模型，不推断你的性格或私人经历。</li>
   </ul>
+  <div class="auth-identity" id="zhihu-identity" hidden><img id="zhihu-avatar" alt="知乎头像" referrerpolicy="no-referrer" hidden><span id="zhihu-name"></span></div>
+  <section id="zhihu-guidance" class="auth-guidance" aria-live="polite" hidden></section>
   <div class="auth-actions">
-    <button type="button" class="btn primary" id="zhihu-continue">继续公共模式</button>
+    <button type="button" class="btn primary" id="zhihu-login" disabled>前往知乎登录并授权</button>
+    <button type="button" class="btn primary" id="zhihu-personalize" hidden>生成个性化引导</button>
+    <button type="button" class="btn ghost" id="zhihu-logout" hidden>退出登录</button>
+    <button type="button" class="btn ghost" id="zhihu-continue">继续游戏</button>
     <button type="button" class="btn ghost" id="zhihu-retry">重新检查</button>
   </div>
-  <small>初始化与真实授权稍后接入。未授权或失败都不会中断游戏。</small>
+  <small>授权在知乎官方页面由你亲自确认；如安全校验失败，不会绕过校验建立登录。退出会清除本站的授权会话；服务重启后需重新登录。</small>
 </dialog>
 <p id="api-budget-notice" class="budget-notice" role="status" hidden></p>
 <nav id="journey" class="journey" aria-label="回信旅程" hidden></nav>
 <main id="app" class="view"></main>
+<section class="game-introduction" aria-label="游戏介绍">
+  <details id="game-intro">
+    <summary><span>第一次来到回声邮局？</span><b>游戏介绍与玩法</b><i aria-hidden="true">＋</i></summary>
+    <div id="game-intro-content" tabindex="-1">
+      <p class="intro-lead">你是一名深夜邮局的值班员。读懂一封匿名来信，用自己的话回信，再看看它可能带来的回声。</p>
+      <ol class="intro-steps">
+        <li><b>01 · 拆信</b><span>读信，把事实、情绪与猜测分开。分错也能继续。</span></li>
+        <li><b>02 · 寻声</b><span>选择角色、问清线索。每个人只知道故事的一部分。</span></li>
+        <li><b>03 · 落笔</b><span>亲手写一封至少 10 字的回信；反馈后有一次改稿机会。</span></li>
+        <li><b>04 · 回响</b><span>阅读可能的结局，回看你的提问和选择。</span></li>
+      </ol>
+      <p>每局有有限的召唤、追问邮票与档案解锁机会，剩余数量会显示在顶部。查资料和登录均可跳过，没有唯一标准答案。</p>
+      <p>知乎登录可提供昵称和头像；经你另行点击同意后，再用少量授权资料推荐来信。未登录或接口不可用，仍能完整通关。</p>
+      <small>故事是原创演示，不是现实人生预测。约 3–5 分钟一局，也可以慢慢阅读。</small>
+    </div>
+  </details>
+</section>
 <footer class="foot">回声邮局 · 知乎黑客松 2026 校园新锐季 · AI 游戏赛道 <span id="foot-note">信件均为原创演示内容，不代表任何真实用户</span></footer>
 <div class="toast" id="toast"></div>
 <script type="module" src="/auth.js"></script>

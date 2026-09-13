@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 const ROOT = process.cwd(), sleep = ms => new Promise(r => setTimeout(r, ms));
 const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.on("error", reject); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 const temp = await mkdtemp(path.join(tmpdir(), "echo-research-browser-"));
-const output = path.join(ROOT, "artifacts", "oauth-entry-2026-09-13"); await mkdir(output, { recursive: true });
+const output = path.resolve(process.env.AUDIT_OUTPUT || path.join(ROOT, "artifacts", "oauth-integration-2026-09-13", "browser-auth")); await mkdir(output, { recursive: true });
 const port = await freePort(), debug = await freePort(), base = `http://127.0.0.1:${port}`;
 const report = { at: new Date().toISOString(), steps: [], checks: {}, errors: [], llm: "none", authenticatedZhihu: false };
 let captureFailure, ws, server, chrome, currentStep = "startup";
@@ -53,10 +53,10 @@ try {
   const statusResponse = await fetch(base + '/api/auth/zhihu/status');
   assert.equal(statusResponse.headers.get('cache-control'), 'no-store');
   assert.equal(statusResponse.headers.get('set-cookie'), null);
-  assert.deepEqual(await statusResponse.json(), {configured:false,authenticated:false,profile:null,mode:'public',personalized:false,reason:'not_configured',quotaMode:'shared'});
+  assert.deepEqual(await statusResponse.json(), {configured:false,authenticated:false,expiresInMs:0,profile:null,mode:'public',personalized:false,personalizationAvailable:false,guidance:null,reason:'not_configured',quotaMode:'shared'});
   const loginResponse = await fetch(base + '/api/auth/zhihu/login', {method:'POST',redirect:'manual'});
   assert.equal(loginResponse.status,503); assert.equal(loginResponse.headers.get('location'),null);
-  assert.equal((await loginResponse.json()).mode,'public');
+  assert.equal((await loginResponse.json()).error,'authorization_unavailable');
   const unavailableCallback = await fetch(base + '/api/auth/zhihu/callback?authorization_code=mock-only', {redirect:'manual'});
   assert.equal(unavailableCallback.status,404); assert.ok(!(await unavailableCallback.text()).includes('mock-only'));
   report.checks.http = true;
@@ -99,7 +99,10 @@ try {
   step('未授权/拒绝/HTTP 失败/断网/畸形响应/超时：显式本地 mock，不访问知乎');
   await viewport(1440,1000);
   await call('Page.addScriptToEvaluateOnNewDocument',{source:`(()=>{const original=window.fetch;window.authMockMode='unauthorized';window.authMockCalls=0;window.fetch=(url,options)=>{
+    if(String(url)==='/api/auth/zhihu/logout')return window.delayLogout?new Promise(resolve=>{window.resolveLogout=()=>resolve(Response.json({ok:true}));}):Promise.resolve(Response.json({ok:true}));
+    if(String(url)==='/api/auth/zhihu/personalization')return new Promise(resolve=>{window.resolveGuidance=()=>resolve(Response.json({guidance:{source:'authorized-context',explanation:'mock guidance',recommendations:[]}}));});
     if(String(url)!=='/api/auth/zhihu/status')return original(url,options);
+    if(window.authMockMode==='authenticated'){window.identityCalls=(window.identityCalls||0)+1;return Promise.resolve(Response.json({configured:true,authenticated:true,profile:{id:'123',name:'Mock Player'},personalizationAvailable:true,expiresInMs:window.mockTTL||60000}));}
     window.authMockCalls++;
     if(window.authMockMode==='network')return Promise.reject(new TypeError('mock network failure'));
     if(window.authMockMode==='hang')return new Promise((resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('mock abort','AbortError')),{once:true}));
@@ -111,7 +114,7 @@ try {
   await call('Page.reload'); await waitFor('document.querySelector("#start-shift") && !document.querySelector("#zhihu-retry").disabled');
   for (const mode of ['unauthorized','denied','http','network','malformed','hang']) {
     await evaluate(`window.authMockMode=${JSON.stringify(mode)}`); await open();
-    assert.match(await detail(),mode==='unauthorized'?/尚未获得知乎授权/:/已回退到公共参考模式/);
+    assert.match(await detail(),mode==='unauthorized'?/尚未获得知乎授权/:mode==='denied'?/已回退到公共参考模式/:/当前继续公共参考模式/);
     assert.equal(await evaluate('location.origin'),base);
     assert.equal(await evaluate('document.querySelector("#zhihu-mode").textContent'),'当前使用公共参考模式');
     if(mode==='network')await screenshot('04-network-fallback');
@@ -126,16 +129,34 @@ try {
   const saved = await evaluate('sessionStorage.getItem("echo.state")'), before = await state();
   await evaluate("window.authMockMode='network'"); await open();
   await click('#zhihu-retry'); await waitFor('!document.querySelector("#zhihu-retry").disabled');
-  assert.match(await detail(),/已回退/);
+  assert.match(await detail(),/当前继续公共参考模式/);
   await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
   await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27}); await closed();
   assert.equal(await evaluate('sessionStorage.getItem("echo.state")'),saved);
   assert.deepEqual(await state(),before);
   assert.equal(await evaluate('document.querySelector("#prog-t").textContent'),'1 / 9');
   report.checks.progressPreserved=true;
+  step('已登录视图与退出期间晚到的个性化响应（显式 mock）');
+  await evaluate("window.authMockMode='authenticated'"); await open();
+  assert.equal(await evaluate('document.querySelector("#zhihu-name").textContent'),'Mock Player');
+  await click('#zhihu-personalize'); await waitFor('typeof window.resolveGuidance === "function"');
+  await click('#zhihu-logout'); await waitFor('document.querySelector("#zhihu-identity").hidden');
+  await evaluate('window.resolveGuidance()'); await sleep(200);
+  assert.equal(await evaluate('document.querySelector("#zhihu-guidance").hidden'),true,'logout must not expose a late private result');
+  report.checks.logoutRace=true;
+  await click('#zhihu-retry'); await waitFor('!document.querySelector("#zhihu-identity").hidden');
+  await evaluate('window.delayLogout=true;window.identityCalls=0'); await click('#zhihu-logout');
+  await evaluate('document.querySelector("#zhihu-retry").click()'); await sleep(100);
+  assert.equal(await evaluate('window.identityCalls'),0,'no status request during logout');
+  await evaluate('window.resolveLogout();window.delayLogout=false'); await waitFor('document.querySelector("#zhihu-identity").hidden');
+  report.checks.logoutBlocksRefresh=true;
+  await evaluate('window.mockTTL=600'); await click('#zhihu-retry'); await waitFor('!document.querySelector("#zhihu-identity").hidden');
+  await click('#zhihu-personalize'); await sleep(700); await evaluate('window.resolveGuidance()'); await sleep(100);
+  assert.equal(await evaluate('document.querySelector("#zhihu-identity").hidden && document.querySelector("#zhihu-guidance").hidden'),true,'expired UI never renders late guidance');
+  report.checks.expiredGuidance=true;
   assert.deepEqual(report.errors,[]);
   report.success=true;
-  report.scope='真实 Chrome + 本地真实 server；OAuth 未配置与登录预留 API 为真实响应；未授权/拒绝/网络故障由明确的浏览器 mock 模拟；未调用真实 OAuth、知乎或付费模型。';
+  report.scope='真实 Chrome + 本地真实 server；OAuth 未配置与跨站拒绝为真实响应；未授权/拒绝/网络故障由明确的浏览器 mock 模拟；未调用真实 OAuth、知乎或付费模型。';
   console.log(JSON.stringify({success:true,checks:Object.keys(report.checks).length}));
 } catch (error) { if (captureFailure) try { await captureFailure(); } catch (captureError) { report.captureError = captureError.message; } report.success = false; report.failure = { step: currentStep, message: error.message }; console.error(error); process.exitCode = 1; }
 finally {
