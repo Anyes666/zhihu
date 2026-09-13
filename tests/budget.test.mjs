@@ -128,3 +128,38 @@ test("账本目录不可创建时不放行，也不覆盖阻挡目录的文件",
     assert.throws(()=>b.reserve('llm',{units:1}),{code:'BUDGET_STORAGE'});b.close();assert.equal(await readFile(blocker,'utf8'),'keep');
   }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test("LLM无限用量跳过累计/每日/玩家/IP额度，仍记账且不影响知乎", () => {
+  const b = fixture({ API_LLM_UNLIMITED: "true", API_LLM_DAILY_CALLS: "0", API_LLM_TOTAL_CALLS: "0", API_LLM_DAILY_UNITS: "0", API_LLM_TOTAL_UNITS: "0", API_LLM_PLAYER_DAILY_CALLS: "0", API_LLM_IP_DAILY_CALLS: "0", API_SEARCH_DAILY_CALLS: "1", API_SEARCH_TOTAL_CALLS: "1" });
+  try {
+    for (let i = 0; i < 25; i++) b.reserve("llm", { units: 100000, actor: actor(1) }).release();
+    const report = b.snapshot();
+    assert.equal(report.llmUnlimited, true);
+    assert.equal(report.usage.find(x => x.kind === "llm").totalCalls, 25);
+    assert.equal(report.usage.find(x => x.kind === "llm").totalUnits, 2500000);
+    assert.equal(b.status().mode, "available");
+    assert.equal(b.status().reason, null);
+    b.reserve("search", { actor: actor(1) }).release();
+    assert.throws(() => b.reserve("search", { actor: actor(1) }), { code: "BUDGET_EXHAUSTED" });
+  } finally { b.close(); }
+});
+
+test("LLM无限用量仍遵守总开关、并发、频率和合法输入保护", () => {
+  const disabled = fixture({ API_LLM_UNLIMITED: "true", API_LIVE_ENABLED: "false" });
+  assert.throws(() => disabled.reserve("llm", { units: 1 }), { code: "BUDGET_DISABLED" }); disabled.close();
+  const b = fixture({ API_LLM_UNLIMITED: "true", API_PLAYER_PER_MINUTE: "2" });
+  try {
+    assert.throws(() => b.reserve("llm", { units: -1 }), { code: "BUDGET_INPUT" });
+    const lease = b.reserve("llm", { units: 1, actor: actor(1) });
+    assert.throws(() => b.reserve("llm", { units: 1, actor: actor(1) }), { code: "BUDGET_CONCURRENT" });
+    lease.release();
+    b.reserve("llm", { units: 1, actor: actor(1) }).release();
+    assert.throws(() => b.reserve("llm", { units: 1, actor: actor(1) }), { code: "BUDGET_RATE" });
+  } finally { b.close(); }
+});
+
+test("无限用量必须显式开启，非true不能绕过LLM预算", () => {
+  const b = fixture({ API_LLM_UNLIMITED: "yes", API_LLM_DAILY_CALLS: "0" });
+  try { assert.throws(() => b.reserve("llm", { units: 1 }), { code: "BUDGET_CONFIG" }); }
+  finally { b.close(); }
+});
