@@ -1,0 +1,1 @@
+﻿import test from "node:test";import assert from "node:assert/strict";import{readFile}from"node:fs/promises";test("assets exist",async()=>{for(const f of ["public/index.html","public/app.js","public/styles.css"]){assert.ok((await readFile(f,"utf8")).length>500)}});

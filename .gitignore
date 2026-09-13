@@ -1,0 +1,42 @@
+# Dependencies and OS metadata
+node_modules/
+.DS_Store
+Thumbs.db
+
+# Real credentials stay local. Only the empty/default template may be committed.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Runtime data, accounting and signing material
+/data/cache/
+/data/budget/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# Browser profiles, screenshots, generated originals, local agent state
+/artifacts/
+/assets-src/
+/.Codex/
+/.codex/
+/.claude/
+/data/contact.jpg
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
+/*.zip
+
+# Downloaded third-party tooling and machine-specific playtest settings
+/docs/official/
+/zhihu-hackathon-skill-v260815/
+/docs/LOCAL-PLAYTEST-*.md
