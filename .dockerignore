@@ -1,0 +1,26 @@
+﻿.env
+.env.*
+!.env.example
+artifacts/
+.Codex/
+.claude/
+.git/
+node_modules/
+assets-src/
+docs/official/
+*.log
+
+# Local API accounting and identity-signing material; never publish.
+data/budget/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Downloaded tooling and local screenshots are not runtime assets.
+zhihu-hackathon-skill-v260815/
+*.zip
+/*.png
+/*.jpg
+/*.jpeg
+/data/contact.jpg
+/docs/LOCAL-PLAYTEST-*.md

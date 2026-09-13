@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>回声邮局：未寄出的答案 · Echo Post</title>
+<meta name="description" content="一间只在深夜营业的邮局。拆解来信、与立场各异的 AI 答主对话、亲手写一封回信，然后看见它在一个陌生人的人生里发出回声。知乎黑客松 2026 · AI 游戏赛道。">
+<link rel="icon" href="/assets/liukanshan.jpg">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/experience.css">
+<link rel="stylesheet" href="/onboarding.css">
+<link rel="stylesheet" href="/auth.css">
+</head>
+<body>
+<div class="desk"></div>
+<div class="grain"></div>
+<header class="top">
+  <a class="brand" href="/" id="brand">
+    <img src="/assets/liukanshan.jpg" alt="刘看山">
+    <span><b>回声邮局</b><small>未寄出的答案 · 深夜营业</small></span>
+  </a>
+  <div class="hud" id="hud" hidden>
+    <span class="res" title="角色召唤"><i>召</i><b id="r-summons">2</b></span>
+    <span class="res" title="追问邮票"><i>邮</i><b id="r-stamps">3</b></span>
+    <span class="res" title="真相解锁"><i>真</i><b id="r-unlock">1</b></span>
+    <span class="res" title="回信修改"><i>改</i><b id="r-revise">1</b></span>
+  </div>
+  <div class="status" id="status"><span class="dot"></span>连接邮局…</div>
+</header>
+<aside class="auth-strip" aria-label="知乎参考模式">
+  <button type="button" id="zhihu-entry" aria-haspopup="dialog" aria-controls="zhihu-dialog" disabled>登录知乎，获得个性化参考</button>
+  <span id="zhihu-mode">当前使用公共参考模式</span>
+</aside>
+<dialog id="zhihu-dialog" class="auth-dialog" aria-labelledby="zhihu-auth-title" aria-describedby="zhihu-auth-description">
+  <div class="auth-dialog-top"><span class="auth-eyebrow">知乎身份 · 预留入口</span><button type="button" id="zhihu-close" aria-label="关闭，继续公共参考模式">关闭 ×</button></div>
+  <h2 id="zhihu-auth-title" tabindex="-1" autofocus>参考可以更贴近你，<br>判断仍由你自己做。</h2>
+  <p id="zhihu-auth-description">计划在你主动授权后，结合你的关注与收藏提供更贴近兴趣的参考。<strong>个性化参考尚未启用，暂不发起真实授权。</strong></p>
+  <div class="auth-state" role="status" aria-live="polite">
+    <b>当前使用公共参考模式</b>
+    <p id="zhihu-auth-detail">正在检查入口状态；无需等待，可以继续游戏。</p>
+  </div>
+  <ul class="auth-boundaries">
+    <li>不登录也能体验完整故事、角色互动和知乎参考台。</li>
+    <li>登录不等于切换搜索额度。搜索、热榜仍使用邮局公共凭证与缓存。</li>
+    <li>本阶段不读取你的关注与收藏，不向知乎发布内容，也不要求你填写 API 密钥。</li>
+  </ul>
+  <div class="auth-actions">
+    <button type="button" class="btn primary" id="zhihu-continue">继续公共模式</button>
+    <button type="button" class="btn ghost" id="zhihu-retry">重新检查</button>
+  </div>
+  <small>初始化与真实授权稍后接入。未授权或失败都不会中断游戏。</small>
+</dialog>
+<p id="api-budget-notice" class="budget-notice" role="status" hidden></p>
+<nav id="journey" class="journey" aria-label="回信旅程" hidden></nav>
+<main id="app" class="view"></main>
+<footer class="foot">回声邮局 · 知乎黑客松 2026 校园新锐季 · AI 游戏赛道 <span id="foot-note">信件均为原创演示内容，不代表任何真实用户</span></footer>
+<div class="toast" id="toast"></div>
+<script type="module" src="/auth.js"></script>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

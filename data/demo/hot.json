@@ -1,0 +1,53 @@
+{
+  "note": "演示数据包：知乎热榜风格条目，非实时抓取",
+  "items": [
+    {
+      "title": "父母把子女当作唯一的精神寄托，子女该如何面对离家的选择？",
+      "url": "https://www.zhihu.com/search?q=父母把子女当成唯一的精神寄托",
+      "summary": "「你去吧」和「你别走」之间，有多少父母选择了沉默。",
+      "thumb": ""
+    },
+    {
+      "title": "考研二战失败后，该三战还是去工作？",
+      "url": "https://www.zhihu.com/search?q=考研三战还是工作",
+      "summary": "差 3 分，是差得最近的一次，也是最贵的一次。",
+      "thumb": ""
+    },
+    {
+      "title": "发现同事在工作中造假，该不该说出来？",
+      "url": "https://www.zhihu.com/search?q=发现同事造假要不要说",
+      "summary": "说了得罪人，不说过不了自己。",
+      "thumb": ""
+    },
+    {
+      "title": "为什么年轻人越来越不愿意和父母沟通？",
+      "url": "https://www.zhihu.com/search?q=年轻人不愿意和父母沟通",
+      "summary": "",
+      "thumb": ""
+    },
+    {
+      "title": "如何看待「本来可以」这种人生叙事？",
+      "url": "https://www.zhihu.com/search?q=本来可以",
+      "summary": "",
+      "thumb": ""
+    },
+    {
+      "title": "职场中「不告发」是一种美德还是一种懦弱？",
+      "url": "https://www.zhihu.com/search?q=职场不告发",
+      "summary": "",
+      "thumb": ""
+    },
+    {
+      "title": "异地工作的独生子女，你们是怎么照顾父母的？",
+      "url": "https://www.zhihu.com/search?q=异地独生子女照顾父母",
+      "summary": "",
+      "thumb": ""
+    },
+    {
+      "title": "考研上岸后，你后悔过吗？",
+      "url": "https://www.zhihu.com/search?q=考研上岸后悔",
+      "summary": "",
+      "thumb": ""
+    }
+  ]
+}

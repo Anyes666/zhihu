@@ -1,0 +1,20 @@
+.auth-strip{display:flex;align-items:center;justify-content:flex-end;gap:14px;padding:7px 22px;border-bottom:1px solid var(--fog);background:#0e1d29;color:#aabdc6;font-size:11px}
+.auth-strip button{border:1px solid #527583;border-radius:6px;padding:7px 12px;background:#122d3c;color:#cce9ed;font-size:12px;min-height:36px;cursor:pointer}
+.auth-strip button:hover{border-color:#a6cacf;background:#183b4a}
+.auth-strip button:disabled{cursor:wait;opacity:.65}
+.auth-strip button:focus-visible,.auth-dialog button:focus-visible{outline:3px solid #90d7ed;outline-offset:3px}
+.auth-dialog{width:min(520px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;border:1px solid #8e9d92;border-radius:14px;padding:26px;background:#102330;color:#e6e2d9;box-shadow:0 22px 80px #0009}
+.auth-dialog::backdrop{background:#040d16b8;backdrop-filter:blur(3px)}
+.auth-eyebrow{font-size:11px;letter-spacing:.1em;color:#b1d2d5}
+.auth-dialog h2{font:25px/1.6 var(--serif);color:#edd7b2;margin:12px 0}
+.auth-dialog p{font-size:13px;line-height:1.85;margin:10px 0}
+.auth-dialog strong{display:block;color:#efc787;font-weight:500;margin-top:6px}
+.auth-state{padding:14px 16px;border:1px solid #557785;background:#16303b;border-radius:9px;margin:18px 0}
+.auth-state b{font-size:13px;color:#d5e9df}.auth-state p{font-size:12px;color:#b7cad0;margin:5px 0 0}
+.auth-boundaries{padding-left:19px;font-size:12px;line-height:1.9;color:#b5c5cc}.auth-boundaries li+li{margin-top:7px}
+.auth-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}.auth-actions button{min-height:42px}
+.auth-dialog>small{display:block;font-size:11px;color:#9cafb9;margin-top:13px;line-height:1.8}
+@media(max-width:600px){.auth-strip{padding:7px 12px;gap:4px 10px;justify-content:center;flex-wrap:wrap}.auth-strip button{font-size:11px;padding:6px 9px}.auth-strip>span{font-size:10px}.auth-dialog{padding:20px}.auth-dialog h2{font-size:22px}}
+.auth-dialog-top{display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;top:0;background:#102330;z-index:1}
+.auth-dialog-top button{background:transparent;border:0;color:#bed1d5;min-height:36px;padding:5px 8px;cursor:pointer}
+#zhihu-auth-title:focus{outline:none}
