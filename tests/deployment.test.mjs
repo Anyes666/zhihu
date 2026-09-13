@@ -40,3 +40,10 @@ test("local Sealos access files are excluded from Git publication", () => {
   assert.match(ignore, /^kubeconfig\*$/m);
   assert.match(ignore, /^\*\*\/kubeconfig\*$/m);
 });
+
+
+test("CI does not override the providers owned by isolated mock tests", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/verify-deployment.yml", import.meta.url), "utf8");
+  const jobConfiguration = workflow.split("    steps:")[0];
+  assert.doesNotMatch(jobConfiguration, /LLM_PROVIDER|ZHIHU_KNOWLEDGE_ENABLED/);
+});
