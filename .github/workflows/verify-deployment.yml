@@ -1,0 +1,73 @@
+name: Verify deployment image
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/verify-deployment.yml
+      - package.json
+      - server.mjs
+      - lib/**
+      - data/characters.mjs
+      - data/letters/**
+      - data/demo/**
+      - public/**
+      - tests/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-game-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      API_LIVE_ENABLED: "false"
+      LLM_PROVIDER: none
+      ZHIHU_KNOWLEDGE_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+      - name: Check syntax and all tests without real API credentials
+        run: |
+          npm run check
+          npm test
+      - name: Build image from the allowlisted context
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          TAG="sha-${GITHUB_SHA}"
+          echo "name=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          docker build --pull --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.revision=$GITHUB_SHA" --tag "$IMAGE:$TAG" .
+      - name: Verify the built container and public-file boundaries
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          TAG: ${{ steps.image.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm "$IMAGE:$TAG" sh -ec 'test ! -e /app/.env; test ! -e /app/.git; test ! -e /app/artifacts; test ! -e /app/data/cache; test ! -e /app/data/budget; test ! -e /app/docs; test ! -e /app/tests'
+          docker run -d --name echo-post-check -p 127.0.0.1:8080:8080 -e API_LIVE_ENABLED=false -e LLM_PROVIDER=none -e ZHIHU_KNOWLEDGE_ENABLED=false "$IMAGE:$TAG"
+          trap 'docker rm -f echo-post-check >/dev/null' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8080/api/health > /tmp/echo-health.json; then break; fi
+            sleep 1
+          done
+          node --input-type=module -e 'import fs from "node:fs"; import assert from "node:assert/strict"; const h=JSON.parse(fs.readFileSync("/tmp/echo-health.json")); assert.equal(h.ok,true); assert.equal(h.project,"echo-post"); assert.equal(h.letters,3); assert.equal(h.llm,"none");'
+          curl --fail --silent http://127.0.0.1:8080/ | grep -q 'id="app"'
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8080/.env)" = 404
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8080/server.mjs)" = 404

@@ -1,26 +1,38 @@
-﻿.env
-.env.*
-!.env.example
-artifacts/
-.Codex/
-.claude/
-.git/
-node_modules/
-assets-src/
-docs/official/
-*.log
+# Default deny: send only reviewed runtime source and public assets to Docker.
+**
+!Dockerfile
+!.dockerignore
+!package.json
+!server.mjs
+!lib/
+!lib/*.mjs
+!data/
+!data/characters.mjs
+!data/letters/
+!data/letters/*.mjs
+!data/demo/
+!data/demo/*.json
+!public/
+!public/*.html
+!public/*.css
+!public/*.js
+!public/assets/
+!public/assets/*.jpg
+!public/assets/*.png
+!public/assets/portraits/
+!public/assets/portraits/*.png
 
-# Local API accounting and identity-signing material; never publish.
+# Defense in depth: no credentials, caches, or accounting data.
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.sqlite
+**/*.sqlite-wal
+**/*.sqlite-shm
+**/*.db
+**/*.log
+data/cache/
 data/budget/
-*.sqlite
-*.sqlite-wal
-*.sqlite-shm
-
-# Downloaded tooling and local screenshots are not runtime assets.
-zhihu-hackathon-skill-v260815/
-*.zip
-/*.png
-/*.jpg
-/*.jpeg
-/data/contact.jpg
-/docs/LOCAL-PLAYTEST-*.md

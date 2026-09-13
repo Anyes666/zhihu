@@ -40,3 +40,8 @@ Thumbs.db
 /docs/official/
 /zhihu-hackathon-skill-v260815/
 /docs/LOCAL-PLAYTEST-*.md
+
+# Local cluster access credentials must never be published.
+kubeconfig*
+**/kubeconfig*
+.kube/
