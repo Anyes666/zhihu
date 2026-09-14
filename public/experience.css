@@ -75,3 +75,21 @@ main.view{max-width:1240px;padding-top:24px}
 .reply-origin{display:block;font:10px/1.7 var(--sans);color:#8ba4af;margin-top:6px;letter-spacing:.03em}
 .paper>.reply-origin{color:#7a6c54}
 @media(max-width:760px){.lobby-scene .scene-envelope{top:21%}.lobby-scene .scene-caption{display:none}.lobby-scene .scene-envelope p{font-size:14px}.writebar{flex-wrap:wrap}}
+
+/* P2-1: parallel rehearsal only; formal archive styles stay untouched. */
+.parallel-entry-actions{display:flex;flex-wrap:wrap;gap:12px;margin:18px 0}
+.parallel-entry-actions .btn{min-height:44px;white-space:normal}
+.parallel-original{margin:12px 0}
+.parallel-original summary,.parallel-rules summary{cursor:pointer;min-height:36px;line-height:1.8}
+.parallel-drafts,.parallel-rule-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:16px 0}
+.parallel-drafts article,.parallel-rule-columns section{min-width:0;border:1px solid var(--fog-2);border-radius:8px;padding:14px}
+.parallel-diff-text{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.9}
+.parallel-diff-text del{background:#743d414d;color:#f1b2b2;text-decoration:line-through}
+.parallel-diff-text ins{background:#3979664d;color:#b7e6d4;text-decoration:underline;text-underline-offset:3px}
+.parallel-comparison{padding:12px 0;line-height:1.8}
+.parallel-deltas small{display:block;font-size:12px;margin:6px 0;color:var(--muted)}
+.parallel-explanation,.parallel-rules{margin-top:18px;line-height:1.8;overflow-wrap:anywhere}
+.parallel-rule-columns ul{padding-left:20px;margin:10px 0}
+.parallel-outcomes article{min-width:0;overflow-wrap:anywhere}
+.parallel .btn:focus-visible,.parallel summary:focus-visible{outline:2px solid var(--amber);outline-offset:4px}
+@media(max-width:760px){.parallel-drafts,.parallel-rule-columns{grid-template-columns:minmax(0,1fr)}.parallel-entry-actions .btn{flex:1 1 180px}.parallel-deltas{grid-template-columns:repeat(2,minmax(0,1fr))}.parallel-deltas>div:last-child{grid-column:1/-1}.parallel-deltas small{font-size:12px}.parallel-deltas b{font-size:18px}}

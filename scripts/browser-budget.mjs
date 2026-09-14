@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 const ROOT = process.cwd(), sleep = ms => new Promise(r => setTimeout(r, ms));
 const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.on("error", reject); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 const temp = await mkdtemp(path.join(tmpdir(), "echo-research-browser-"));
-const output = path.join(ROOT, "artifacts", "budget-protection-2026-09-13"); await mkdir(output, { recursive: true });
+const output = path.resolve(process.env.AUDIT_OUTPUT || path.join(ROOT, "artifacts", "budget-protection-2026-09-13")); await mkdir(output, { recursive: true });
 const port = await freePort(), debug = await freePort(), base = `http://127.0.0.1:${port}`;
 const report = { at: new Date().toISOString(), steps: [], checks: {}, errors: [], llm: "deepseek-local-mock", authenticatedZhihu: false };
 let captureFailure, ws, server, chrome, mock, mockCalls = 0, currentStep = "startup";

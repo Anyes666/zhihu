@@ -1,3 +1,4 @@
+import { selectionMarkup, clueModel, clueQuestion, writingMarkup, modeDescription, actionReceiptMarkup } from "./investigation.js";
 import { mountGuide, reflectionMarkup } from "./onboarding.js";
 import { LETTER_GUIDES, starterQuestions, stageMarkup } from "./experience.js";
 import { mountRehearsal } from "./rehearsal.js";
@@ -9,8 +10,9 @@ const S = { meta: null, session: null, letter: null, kanshan: "", chars: {}, vie
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const CATS = ["fact", "emotion", "demand", "bias", "avoidance", "clue"];
 const guide = mountGuide();
+const pendingAsk = () => !!S.askUncertain && S.askUncertain.sid === S.session?.id;
 function guideSync() {
-  guide.sync({ view: S.view, sid: S.session?.id, busy: !!S.busy,
+  guide.sync({ view: S.view, sid: S.session?.id, busy: !!S.busy || pendingAsk(),
     selected: S.selected, selectedText: S.letter?.body.find(b => b.id === S.selected)?.text, assigned: Object.keys(S.sortAssign).length, total: S.letter?.body.length,
     sortDone: !!$("#go-talk"), summoned: S.session?.summoned.length || 0,
     talks: S.session?.talks.length || 0, stamps: S.session?.resources.stamps || 0,
@@ -31,7 +33,7 @@ async function api(path, method = "GET", data) {
 async function stream(path, data, handlers) {
   const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: data ? JSON.stringify(data) : undefined });
   if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || `HTTP ${res.status}`); }
-  const reader = res.body.getReader(), dec = new TextDecoder(); let buf = "";
+  const reader = res.body.getReader(), dec = new TextDecoder(); let buf = "", completed = false;
   while (true) {
     const { value, done } = await reader.read(); if (done) break;
     buf += dec.decode(value, { stream: true });
@@ -40,12 +42,16 @@ async function stream(path, data, handlers) {
       const ev = block.match(/^event: (.*)$/m)?.[1], dat = block.match(/^data: (.*)$/m)?.[1];
       if (!ev) continue; let payload = dat; try { payload = JSON.parse(dat); } catch {}
       if (ev === "error") throw new Error(payload.error || "流式响应出错");
+      if (ev === "done") completed = true;
+      if (handlers.active && !handlers.active()) continue;
       if (ev === "notice" && payload?.text) {
-        const notice = $("#api-budget-notice"); notice.hidden = false; notice.textContent = payload.text;
+        $("#mode-details-text").textContent = payload.text;
+        const notice = $("#api-budget-notice"); notice.hidden = false; notice.textContent = "本段实时增强不可用，已使用经典模式继续；无需登录，游戏流程不受影响。详情可展开模式说明。";
       }
       handlers[ev]?.(payload);
     }
   }
+  if (!completed) throw new Error("响应未完整送达，正在核实已受理的操作。");
 }
 function toast(msg, ms = 2600) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove("show"), ms); }
 function save() { try { sessionStorage.setItem("echo.state", JSON.stringify({ sid: S.session?.id, view: S.view, char: S.char, sortAssign: S.sortAssign })); } catch {} }
@@ -64,7 +70,7 @@ const charName = id => id === "silent" && S.chars?.silent?.name ? S.chars.silent
 
 // ---------- 门厅 ----------
 async function renderHome() {
-  view("home"); S.session = null; S.char = null; S.sortAssign = {}; S.selected = null; S.ending = null; S.materials = null; S.dataPoints = [];
+  view("home"); S.askUncertain = null; S.busy = false; S.session = null; S.char = null; S.sortAssign = {}; S.selected = null; S.ending = null; S.materials = null; S.dataPoints = [];
   app.innerHTML = `<div class="panel" style="text-align:center"><span class="spinner"></span> 正在打开邮局的灯…</div>`;
   try { S.meta = await api("/api/letters"); } catch (e) { app.innerHTML = `<div class="panel">邮局暂时打不开：${esc(e.message)}</div>`; return; }
   const h = S.meta.hot;
@@ -94,7 +100,7 @@ async function renderHome() {
 async function startLetter(letterId) {
   app.innerHTML = `<div class="panel" style="text-align:center"><span class="spinner"></span> 正在拆封…</div>`;
   const r = await api("/api/session", "POST", { letterId });
-  adopt(r); S.sortAssign = {}; S.selected = null; renderRead();
+  adopt(r); S.askUncertain = null; S.busy = false; S.sortAssign = {}; S.selected = null; renderRead();
 }
 function renderRead() {
   view("read"); const L = S.letter;
@@ -119,13 +125,13 @@ function renderSort() {
       <p class="muted" style="font-size:13px;margin:0 0 12px">拖动句子到右侧的分类框，或者先点句子、再点分类。已放入的句子可以点分类框里的小标签撤回。</p>
       <div class="frags" id="frags">${L.body.map((b, i) => `<button class="frag" draggable="true" data-id="${b.id}"><span class="n">${String(i + 1).padStart(2, "0")}</span><span class="tx">${esc(b.text)}</span><span class="cat" hidden></span></button>`).join("")}</div>
     </div>
-    <div class="trays" id="trays">${CATS.map(c => `<div class="tray" data-cat="${c}"><h4><button type="button" class="tray-choice" data-choice="${c}">${esc(cats[c].label)}</button><span id="cnt-${c}">0</span></h4><small>${esc(cats[c].hint)}</small><div class="chips" id="chips-${c}"></div></div>`).join("")}</div>
+    <div class="trays" id="trays"><section id="sort-selection" class="sort-selection" aria-label="当前选句分类" hidden></section>${CATS.map(c => `<div class="tray" data-cat="${c}"><h4><button type="button" class="tray-choice" data-choice="${c}">${esc(cats[c].label)}</button><span id="cnt-${c}">0</span></h4><small>${esc(cats[c].hint)}</small><div class="chips" id="chips-${c}"></div></div>`).join("")}</div>
     <div class="sortbar"><div class="progress"><b id="prog" style="width:0%"></b></div><span class="muted" id="prog-t" style="font-size:13px">0 / ${L.body.length}</span><button class="btn" id="seal" disabled>封存分类 →</button></div>
   </section>`;
   const frags = $("#frags"), trays = $("#trays");
   const assign = (id, cat) => { if (S.session.phase !== "sort") return; S.sortAssign[id] = cat; S.selected = null; paintSort(); };
   frags.querySelectorAll(".frag").forEach(f => {
-    f.onclick = () => { S.selected = S.selected === f.dataset.id ? null : f.dataset.id; paintSort(); };
+    f.onclick = () => { S.selected = S.selected === f.dataset.id ? null : f.dataset.id; paintSort(); if (S.selected && matchMedia("(max-width:980px)").matches) { const box = $("#sort-selection"), r = box.getBoundingClientRect(); if (r.top < 90 || r.bottom > innerHeight - 30) box.scrollIntoView({ block: "center", behavior: "instant" }); } };
     f.ondragstart = e => { e.dataTransfer.setData("text/plain", f.dataset.id); S.selected = f.dataset.id; paintSort(); };
   });
   trays.querySelectorAll(".tray").forEach(t => {
@@ -134,6 +140,11 @@ function renderSort() {
     t.ondrop = e => { e.preventDefault(); t.classList.remove("over"); const id = e.dataTransfer.getData("text/plain"); if (id) assign(id, t.dataset.cat); };
     t.onclick = e => { if (S.session.phase !== "sort") return; if (e.target.closest(".chip")) { delete S.sortAssign[e.target.closest(".chip").dataset.id]; paintSort(); return; } if (S.selected) assign(S.selected, t.dataset.cat); else toast("先点一句话，再点分类框"); };
   });
+  $("#sort-selection").onclick = e => {
+    const button = e.target.closest('[data-place]');
+    if (button && S.selected) assign(S.selected, button.dataset.place);
+    else if (e.target.closest('#selection-cancel')) { S.selected = null; paintSort(); }
+  };
   $("#seal").onclick = sealSort;
   paintSort();
 }
@@ -142,6 +153,8 @@ function paintSort() {
   document.querySelectorAll(".frag").forEach(f => { const c = S.sortAssign[f.dataset.id]; f.classList.toggle("selected", S.selected === f.dataset.id); f.classList.toggle("placed", !!c); const ce = f.querySelector(".cat"); ce.hidden = !c; ce.textContent = c ? catLabel(c) : ""; });
   for (const c of CATS) { const ids = Object.entries(S.sortAssign).filter(([, v]) => v === c).map(([k]) => k); $("#cnt-" + c).textContent = ids.length; $("#chips-" + c).innerHTML = ids.map(id => `<button type="button" class="chip" data-id="${id}" aria-label="撤回：${esc(L.body.find(b => b.id === id).text)}" title="点击撤回">${esc(L.body.find(b => b.id === id).text.slice(0, 12))}…</button>`).join(""); }
   $("#prog").style.width = (n / L.body.length * 100) + "%"; $("#prog-t").textContent = `${n} / ${L.body.length}`; $("#seal").disabled = n < L.body.length;
+  const selected = $("#sort-selection"), text = L.body.find(b => b.id === S.selected)?.text;
+  selected.hidden = !text; selected.innerHTML = selectionMarkup(text);
   save(); guideSync();
 }
 async function sealSort() {
@@ -149,7 +162,7 @@ async function sealSort() {
   try {
     $("#seal").disabled = true; $("#seal").innerHTML = `<span class="spinner"></span>`;
     const r = await api(`/api/session/${S.session.id}/sort`, "POST", { assignments: S.sortAssign });
-    S.session = r.session; setHud();
+    S.session = r.session; S.selected = null; $("#sort-selection").hidden = true; setHud();
     const res = r.result;
     document.querySelectorAll(".frag").forEach(f => { const it = res.items.find(i => i.id === f.dataset.id); f.classList.add(it.correct ? "ok" : "bad"); f.draggable = false; f.onclick = null; const ce = f.querySelector(".cat"); ce.textContent = it.correct ? `✓ ${catLabel(it.type)}` : it.type ? `✗ 应为「${catLabel(it.type)}」` : `✗ ${catLabel(it.chosen)}`; });
     document.querySelectorAll(".chip").forEach(ch => { const it = res.items.find(i => i.id === ch.dataset.id); ch.classList.add(it.correct ? "ok" : "bad"); });
@@ -184,8 +197,8 @@ function renderTalk() {
     </aside>
     <div class="panel chat" id="chat"><div class="head" id="chat-head"><div class="muted" style="font-size:14px">← 先从左边召唤一个人。每次召唤消耗 1 次机会，开场白免费；之后每追问一句消耗 1 枚邮票。</div></div>
       <div class="msgs" id="msgs"><div class="chat-invitation"><span>留一个座位，听一句真话。</span><p>先选一位角色。开场白免费；追问会消耗一枚邮票。</p></div></div><div id="question-starters" class="question-starters"></div>
-      <div class="compose"><input id="q" placeholder="召唤后在这里提问……（真话通常要问得温和或具体）" disabled maxlength="200"><button class="btn" id="send" disabled>提问</button></div>
-      <div class="hintline"><span id="att-hint">提问的态度会被识别：温和 / 具体 / 中性 / 引导 / 敌意 —— 角色会据此改变说多少。</span><span id="stamp-hint"></span></div>
+      <div class="compose"><input id="q" placeholder="召唤后在这里提问……（真话通常要问得温和或具体）" disabled maxlength="200"><button class="btn" id="send" disabled>发送提问</button></div>
+      <div class="hintline"><span id="att-hint">发送成功消耗 1 枚提问邮票；编辑不消耗。反应由游戏规则判断，不是心理分析。</span><span id="stamp-hint"></span></div><div id="ask-recovery" class="action-receipt" role="status" hidden></div><div id="action-receipt" class="action-receipt" role="status" aria-live="polite" hidden></div>
     </div>
     <aside class="board">
       <div class="panel" id="truths"></div>
@@ -196,31 +209,64 @@ function renderTalk() {
   S.hintIdx = 0; paintHints(); paintTruths();
   $("#more-hint").onclick = () => { S.hintIdx++; paintHints(); };
   $("#send").onclick = ask; $("#q").onkeydown = e => { if (e.key === "Enter") ask(); };
-  $("#go-write").onclick = () => { if (!S.busy) renderWrite(); };
+  $("#go-write").onclick = () => { if (!S.busy && !pendingAsk()) renderWrite(); };
   $("#open-research").onclick = () => { const desk = $(".research-desk"); desk.open = true; desk.scrollIntoView({ behavior: "smooth", block: "start" }); };
   document.querySelectorAll(".card[data-char]").forEach(c => c.onclick = () => summon(c.dataset.char));
   loadEchoes();
   if (S.char) openChat(S.char, true);
+  paintActionReceipt(S.session.talks.at(-1)?.receipt, { recovered: true }); paintAskRecovery();
   watchResearchGuide(); guideSync();
 }
 function castCard(c) {
   const s = S.session, summoned = s.summoned.includes(c.id), left = s.left.includes(c.id);
-  return `<button class="card char-${c.id} mood-${s.mood?.[c.id] || "guarded"} ${summoned ? "summoned" : ""} ${left ? "left" : ""} ${S.char === c.id ? "active" : ""}" data-char="${c.id}"><img src="${portraitOf(c)}" alt=""><div><b>${esc(charName(c.id))}</b><div class="role">${esc(roleOf(c))}</div><div class="tl">${esc(left ? "（已离开）" : c.tagline)}</div></div></button>`;
+  return `<button class="card char-${c.id} mood-${s.mood?.[c.id] || "guarded"} ${summoned ? "summoned" : ""} ${left ? "left" : ""} ${S.char === c.id ? "active" : ""}" data-char="${c.id}"><img src="${portraitOf(c)}" alt=""><div><b>${esc(charName(c.id))}</b><div class="role">${esc(roleOf(c))}</div><div class="tl">${esc(left ? "（已离开）" : c.tagline)}</div><small class="cast-cost">${left ? "无法继续提问" : summoned ? "已邀请 · 切换不消耗" : "邀请消耗 1 次 · 开场白免费"}</small></div></button>`;
 }
 function paintHints() {
   const hs = S.hints || []; const box = $("#hints"); if (!box) return;
   box.innerHTML = hs.slice(0, S.hintIdx).map(h => `<div class="h">${esc(h)}</div>`).join("") || `<div class="muted" style="font-size:12px">刘看山知道谁掌握什么，但不会替你问。</div>`;
   const b = $("#more-hint"); if (S.hintIdx >= hs.length) { b.disabled = true; b.textContent = S.norms ? "（他补了一句）" + S.norms : "刘看山说完了"; b.style.whiteSpace = "normal"; b.style.textAlign = "left"; }
 }
+function paintAskRecovery() {
+  const box = $("#ask-recovery"); if (!box) return;
+  const sid = S.askUncertain?.sid; box.hidden = !sid || sid !== S.session?.id;
+  if (box.hidden) { box.innerHTML = ''; return; }
+  box.innerHTML = '<p>本局有一次提问待核实。切换角色不会重发或取消这次操作；先恢复服务端状态再继续。</p><button type="button" class="btn ghost sm">重新核实服务端状态</button>';
+  const retry = box.querySelector('button');
+  retry.onclick = async () => {
+    retry.disabled = true;
+    try {
+      const recovered = await api(`/api/session/${sid}/state`);
+      if (S.session?.id !== sid || S.view !== 'talk') return;
+      adopt(recovered); S.askUncertain = null; renderTalk(); toast('状态已恢复，请以现有对话和剩余邮票为准。');
+    } catch { if (box.isConnected) { retry.disabled = false; toast('仍无法连接，当前未自动重发提问。'); } }
+  };
+}
+function paintActionReceipt(receipt, flags = {}) {
+  const box = $("#action-receipt"); if (!box) return;
+  box.innerHTML = actionReceiptMarkup(receipt, flags); box.hidden = !receipt;
+  box.querySelectorAll('[data-receipt-action]').forEach(button => button.onclick = () => {
+    if (S.busy || pendingAsk()) return;
+    const action = button.dataset.receiptAction;
+    if (action === 'write') return renderWrite();
+    const target = action === 'ask' ? $("#q") : action === 'summon' ? $("#cast") : $("#unlock");
+    target?.scrollIntoView({block:'center',behavior:'instant'});
+    if (action === 'ask' && !target?.disabled) target.focus({preventScroll:true});
+  });
+}
 function paintTruths() {
   const box = $("#truths"); if (!box) return; const s = S.session, total = S.letter.truthCount;
-  const unlocked = s.truthsUnlocked;
-  box.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center"><h3>线索板 · 真相 ${unlocked.length}/${total}</h3><button class="btn ghost sm" id="unlock" ${s.resources.unlock <= 0 || unlocked.length >= total ? "disabled" : ""}>动用邮局档案</button></div>
-    <div style="display:grid;gap:8px;margin-top:10px">
-    ${unlocked.map(t => `<div class="truthcard"><b>${esc(t.title)}</b><p>${esc(t.text)}</p><small>来源：${esc(t.source)} · 第 ${t.depth} 层</small></div>`).join("")}
-    ${Array.from({ length: total - unlocked.length }).map((_, i) => `<div class="truthcard locked"><b>🔒 第 ${unlocked.length + i + 1} 层真相</b><p class="muted" style="font-size:12px">${s.leads[i] ? esc(s.leads[i].hint) : "问对人、问对态度，或动用一次邮局档案。"}</p></div>`).join("")}
-    </div>
-    ${s.leads.length ? `<p class="muted" style="font-size:12px;margin:10px 0 0">拆信时你抓到的暗门：${s.leads.map(l => `「${esc(S.letter.body.find(b => b.id === l.segId).text.slice(0, 14))}…」`).join(" ")}</p>` : ""}`;
+  const unlocked = s.truthsUnlocked, model = clueModel(S.letter, s);
+  const questionButton = text => `<button type="button" class="btn ghost sm clue-question" data-clue="${esc(text)}">围绕这件事提问 ↗</button>`;
+  box.innerHTML = `<div class="board-heading"><h3>线索板 · 已确认 ${unlocked.length}/${total}</h3><button class="btn ghost sm" id="unlock" ${s.resources.unlock <= 0 || unlocked.length >= total ? "disabled" : ""}>档案提示（1次）</button></div>
+    <details class="mail-facts"><summary>来信明示事实 · ${model.facts.length} 条</summary><p class="muted">仅表示来信这样陈述，尚非独立核实。只收录封存时已确认分类的句子。</p>${model.facts.map(f=>`<div class="truthcard"><p>${esc(f.text)}</p><small>来源：${esc(f.source)}</small>${questionButton(f.text)}</div>`).join('') || '<p class="muted">本次分类尚未确认明示事实；可以回看原信，继续问清。</p>'}</details>
+    <h4 class="board-subtitle">已确认线索 · 对话或档案</h4><div class="board-confirmed">${model.confirmed.map(t=>`<div class="truthcard"><b>${esc(t.title)}</b><p>${esc(t.text)}</p><small>来源：${esc(t.source)} · 第 ${t.depth} 层</small>${questionButton(t.text)}</div>`).join('') || '<p class="muted">还没有确认线索。对话开场不等于已获得新证据。</p>'}</div>
+    <h4 class="board-subtitle">还需要问清 · ${total-unlocked.length} 层未确认</h4><div class="board-pending">${model.pending.map(l=>`<div class="truthcard locked"><p>「${esc(l.text)}」</p><small>来源：拆信时发现的公开方向 · ${esc(l.hint)}</small>${questionButton(l.text)}</div>`).join('') || `<p class="muted">${unlocked.length >= total ? '本局隐藏线索已确认；回信是否用好这些依据是另一回事。' : '没有额外公开方向。可从来信已知细节出发，不要把推测当答案。'}</p>`}</div>
+    <p class="board-boundary">知乎笔记是外部参考，不会自动变成本案事实，也不解锁真相。</p><p id="clue-status" role="status"></p>`;
+  box.querySelectorAll('[data-clue]').forEach(button=>button.onclick=()=>{
+    if (!S.char || $("#q")?.disabled || S.busy) { $("#clue-status").textContent = S.session.resources.stamps <= 0 ? '提问邮票已用完，可保留这个疑问写进回信。' : '先邀请并选中一位角色，再从这条线索提问。'; return; }
+    $("#q").value = clueQuestion(button.dataset.clue); $("#clue-status").textContent = '已填入提问方向，尚未发送、未消耗邮票；请按自己的想法修改。';
+    $("#q").scrollIntoView({block:'center',behavior:'instant'}); $("#q").focus({preventScroll:true});
+  });
   $("#unlock").onclick = async () => { try { const r = await api(`/api/session/${S.session.id}/unlock`, "POST"); S.session = r.session; setHud(); paintTruths(); toast(`邮局档案翻开了：「${r.result.truth.title}」`); } catch (e) { toast(e.message); } };
 }
 async function loadEchoes() {
@@ -246,10 +292,10 @@ async function summon(charId) {
     document.querySelectorAll(".card[data-char]").forEach(c => c.onclick = () => summon(c.dataset.char));
     openChat(charId, r.result.already, r.result.opener);
   } catch (e) { toast(e.message); lockInput(false); }
-  S.busy = false; if ($("#go-write")) $("#go-write").disabled = false;
+  S.busy = false; if ($("#go-write")) $("#go-write").disabled = pendingAsk();
   guideSync();
 }
-function lockInput(on) { const q = $("#q"), b = $("#send"); if (!q) return; const disabled = on || S.session.resources.stamps <= 0; q.disabled = disabled; b.disabled = disabled; document.querySelectorAll("[data-starter]").forEach(button => button.disabled = disabled); if ($("#go-write")) $("#go-write").disabled = Boolean(S.busy); if (on) q.value = ""; }
+function lockInput(on) { const q = $("#q"), b = $("#send"); if (!q) return; const disabled = on || pendingAsk() || S.session.resources.stamps <= 0; q.disabled = disabled; b.disabled = disabled; document.querySelectorAll("[data-starter]").forEach(button => button.disabled = disabled); if ($("#go-write")) $("#go-write").disabled = Boolean(S.busy || pendingAsk());  }
 function paintStarters(charId) {
   const box = $("#question-starters"); if (!box) return;
   const questions = starterQuestions(S.letter.id, charId);
@@ -258,6 +304,7 @@ function paintStarters(charId) {
 }
 function moodLabel(m) { return { guarded: "有所戒备", listening: "认真倾听", open: "逐渐敞开", withdrawn: "不愿多说" }[m] || "有所戒备"; }
 function openChat(charId, already, opener) {
+  $("#q").value = "";
   const c = charOf(charId), s = S.session; S.char = charId; save();
   $("#chat-head").dataset.mood = s.mood?.[charId] || "guarded"; $("#chat-head").dataset.char = charId; $("#chat-head").innerHTML = `<img src="${portraitOf(c)}" alt=""><div style="flex:1"><b>${esc(charName(charId))}</b> <span class="muted" style="font-size:12px">${esc(roleOf(c))}</span><div class="muted" style="font-size:12px;margin-top:2px">${esc(c.stance)}</div><div class="mood" id="mood-v">${moodLabel(s.mood?.[charId])}</div></div><div class="trust"><label><span>信任度</span><span id="trust-v">${s.trust[charId]}</span></label><div class="bar"><b id="trust-b" style="width:${s.trust[charId]}%"></b></div></div>`;
   const msgs = $("#msgs"); msgs.innerHTML = "";
@@ -283,28 +330,45 @@ function addMsg(who, text, me, talk, truth) {
   $("#msgs").appendChild(d); if (!me && talk) setReplyOrigin(d.querySelector(".txt"), talk.generated); $("#msgs").scrollTop = 1e9; return d.querySelector(".txt");
 }
 async function ask() {
-  if (S.busy) return;
+  if (S.busy || pendingAsk()) return;
   const q = $("#q").value.trim(); if (!q || !S.char) return;
-  const s = S.session; if (s.resources.stamps <= 0) return toast("邮票用完了。去落笔吧——或者先听听刘看山。");
+  const s = S.session; const active = () => S.session?.id === s.id && S.view === "talk"; if (s.resources.stamps <= 0) return toast("邮票用完了。去落笔吧——或者先听听刘看山。");
   S.busy = true; guideSync(); const askedChar = S.char;
-  $("#q").value = ""; lockInput(true);
+  const beforeTalks = s.talks.length; $("#q").value = ""; lockInput(true);
+  if ($("#action-receipt")) $("#action-receipt").hidden = true;
   const meEl = addMsg("你", q, true); const txt = addMsg(charName(askedChar), "", false); txt.classList.add("cursor"); let acc = "";
   try {
-    await stream(`/api/session/${s.id}/ask`, { charId: askedChar, question: q }, {
-      meta: m => { meEl.parentElement.querySelector(".who").innerHTML = `你 <span class="att">· 态度：${esc(m.attitudeLabel)} <span class="d ${m.trustDelta < 0 ? "neg" : ""}">信任 ${m.trustDelta >= 0 ? "+" : ""}${m.trustDelta}</span></span>`; $("#trust-v").textContent = m.trust; $("#trust-b").style.width = m.trust + "%"; const moodEl = $("#mood-v"); if (moodEl) moodEl.textContent = moodLabel(m.mood); $("#chat-head").dataset.mood = m.mood || "guarded"; if (m.left) toast(`${m.name}离开了。`); },
-      delta: d => { acc += d; txt.textContent = acc; $("#msgs").scrollTop = 1e9; },
-      reset: () => { acc = ""; txt.textContent = ""; },
-      notice: n => toast(n.text),
-      done: d => { txt.classList.remove("cursor"); txt.textContent = d.text; setReplyOrigin(txt, d.generated); S.session = d.session; if (d.truth) { txt.classList.add("truth"); toast(`✦ 解锁真相：「${d.truth.title}」`, 3500); } }
+    await stream(`/api/session/${s.id}/ask`, { charId: askedChar, question: q }, { active,
+      meta: m => { if (!active()) return; meEl.parentElement.querySelector(".who").innerHTML = `你 <span class="att">· 态度：${esc(m.attitudeLabel)} <span class="d ${m.trustDelta < 0 ? "neg" : ""}">信任 ${m.trustDelta >= 0 ? "+" : ""}${m.trustDelta}</span></span>`; $("#trust-v").textContent = m.trust; $("#trust-b").style.width = m.trust + "%"; const moodEl = $("#mood-v"); if (moodEl) moodEl.textContent = moodLabel(m.mood); $("#chat-head").dataset.mood = m.mood || "guarded"; if (m.left) toast(`${m.name}离开了。`); },
+      delta: d => { if (!active()) return; acc += d; txt.textContent = acc; $("#msgs").scrollTop = 1e9; },
+      reset: () => { if (!active()) return; acc = ""; txt.textContent = ""; },
+      notice: n => { if (active()) toast(n.text); },
+      done: d => { if (!active()) return; paintActionReceipt(d.receipt || d.session.talks.at(-1)?.receipt, {replayed: d.replayed}); txt.classList.remove("cursor"); txt.textContent = d.text; setReplyOrigin(txt, d.generated); S.session = d.session; if (d.truth) { txt.classList.add("truth"); toast(`✦ 解锁真相：「${d.truth.title}」`, 3500); } }
     });
-  } catch (e) { txt.classList.remove("cursor"); txt.textContent = "（信号断了）" + e.message; }
+  } catch (e) {
+    if (!active()) return;
+    txt.classList.remove("cursor");
+    try {
+      const recovered = await api(`/api/session/${s.id}/state`); if (!active()) return; S.session = recovered.session;
+      const accepted = S.session.talks.slice(beforeTalks).find(t => t.char === askedChar && t.q === q);
+      if (accepted) {
+        txt.textContent = accepted.a; setReplyOrigin(txt, accepted.generated === true);
+        toast("回应传输中断，已从服务端恢复这次提问；不会再扣邮票。", 5000);
+        paintActionReceipt(accepted.receipt, { recovered: true });
+      } else { txt.textContent = "本次提问未被受理，未消耗邮票。请检查网络后重试。"; $("#q").value = q; }
+    } catch {
+      if (!active()) return;
+      S.askUncertain = { sid: s.id }; txt.textContent = "网络中断，暂时无法确认是否已扣邮票。请先核实状态，不要重复发送。";
+      paintAskRecovery();
+    }
+  }
+  if (!active()) return;
   S.busy = false; setHud(); paintTruths();
   const left = S.session.left.includes(askedChar);
   document.querySelectorAll(".card[data-char]").forEach(c => c.outerHTML = castCard(charOf(c.dataset.char)));
   document.querySelectorAll(".card[data-char]").forEach(c => c.onclick = () => summon(c.dataset.char));
   lockInput(left); $("#stamp-hint").textContent = `剩余邮票 ${S.session.resources.stamps} 枚`;
   if (S.session.resources.stamps <= 0) $("#att-hint").textContent = "邮票用完了。你现在知道的，就是你能写进回信里的全部。";
-  if (!left) $("#q").focus();
   guideSync();
 }
 
@@ -336,7 +400,7 @@ async function renderWrite(draft = "") {
     </aside>
     <div>
       <article class="paper"><div class="meta"><span>回信 · 致 ${esc(L.from)}</span><span>${s.reply?.revised || s.phase === "revise" ? "第二稿" : "第一稿"} · 自由书写</span></div>
-        <textarea id="reply" maxlength="2000" aria-label="给寄信人的回信" placeholder="写给${esc(L.from)}的话。没有选项，没有模板。&#10;&#10;一些过来人的经验：先说结论，再说依据；用上你问出来的事实；让对方先觉得被看见，再讲道理；最后留一个今晚就能做的小事。">${esc(draft || "")}</textarea>
+        ${writingMarkup()}<textarea id="reply" minlength="10" maxlength="2000" aria-label="给寄信人的回信" placeholder="写给${esc(L.from)}的话。没有选项，没有模板。&#10;&#10;一些过来人的经验：先说结论，再说依据；用上你问出来的事实；让对方先觉得被看见，再讲道理；最后留一个今晚就能做的小事。">${esc(draft || "")}</textarea>
         <div class="writebar"><span id="cnt">0 字 · 建议 120–600 字</span><button class="btn" id="post">寄出回信 →</button></div>
       </article>
       <div id="research-host"></div><div id="review-area"></div>
@@ -344,7 +408,7 @@ async function renderWrite(draft = "") {
   mountResearch($("#research-host"), S.session.id, { letterId: S.letter.id, readOnly: !["talk", "write", "revise"].includes(S.session.phase) });
   const ta = $("#reply");
   const cnt = () => { let saved = ""; try { sessionStorage.setItem("echo.draft." + s.id, ta.value); saved = ta.value ? " · 本标签页已暂存" : ""; } catch { saved = " · 草稿无法暂存，请勿刷新"; } $("#cnt").textContent = `${ta.value.replace(/\s/g, "").length} 字 · 建议 120–600 字${saved}`; };
-  ta.oninput = cnt; cnt(); ta.focus();
+  ta.oninput = cnt; cnt();
   $("#post").onclick = postReply;
   if (s.phase === "review" && s.reply) {
     ta.readOnly = true; $("#post").disabled = true;
@@ -429,6 +493,8 @@ async function renderEcho(restored = null) {
   renderCommunity(ending);
   $("#reflection-host").innerHTML = reflectionMarkup(S.session, ending);
   mountRehearsal($("#rehearsal-host"), S.session.id, S.session.reply?.text || "");
+  const actions = $(".parallel-entry-actions");
+  if (actions) { const next = document.createElement('button'); next.type = 'button'; next.className = 'btn ghost parallel-next'; next.textContent = '再接一封信'; next.onclick = () => $("#again").click(); actions.appendChild(next); }
   guideSync();
 }
 function renderCommunity(e) {
@@ -444,13 +510,13 @@ function renderCommunity(e) {
 }
 function renderEchoSide(e) {
   const side = $("#echo-side"), keys = ["demand", "accuracy", "warmth", "safety", "community"], lab = { demand: "诉求回应", accuracy: "事实准确", warmth: "情感温度", safety: "风险规避", community: "社区适配" };
-  side.innerHTML = `${receiptHTML(e.research)}<div class="panel persona"><div class="eyebrow">你的回答人格</div><div class="t">${esc(e.persona.title)}</div><p>${esc(e.persona.sub)}</p><p class="muted">${esc(e.persona.talkStyle)}</p><div style="margin-top:10px"><span class="tag amber">${esc(e.familyLabel)}</span> <span class="tag">${esc(e.depthLabel)}</span></div></div>
-    ${e.missed.length ? `<div class="missed"><b>你没看到的 ${e.missed.length} 层真相</b>${e.missed.map(m => `<p><b style="color:var(--amber);font-size:13px">${esc(m.title)}</b>　${esc(m.text)}</p>`).join("")}</div>` : `<div class="missed"><b>你看见了这封信的全部真相</b><p>两层都被你问出来了。</p></div>`}
+  side.innerHTML = `${receiptHTML(e.research)}<div class="panel persona"><div class="eyebrow">你的回答人格</div><div class="t">${esc(e.persona.title)}</div><p>${esc(e.persona.sub)}</p><p class="muted">${esc(e.persona.talkStyle)}</p><div style="margin-top:10px"><span class="tag amber">${esc(e.familyLabel)}</span> <span class="tag">${esc(e.depthLabel)}</span><p class="evidence-confirmed">${esc(e.evidence?.confirmed.label || "已确认真相数量未记录")}</p><small class="muted">依据覆盖是回信对相关信息的回应程度，不等于隐藏线索已全部确认。</small></div></div>
+    ${e.missed.length ? `<div class="missed"><b>你没看到的 ${e.missed.length} 层真相</b>${e.missed.map(m => `<p><b style="color:var(--amber);font-size:13px">${esc(m.title)}</b>　${esc(m.text)}</p>`).join("")}</div>` : `<div class="missed"><b>你看见了这封信的全部真相</b><p>本局隐藏线索均已通过对话或邮局档案确认。</p></div>`}
     <div class="panel"><h3>关键选择时间线</h3><div class="timeline" style="margin-top:10px">${e.timeline.map(t => `<div><i></i><span>${esc(t.text)}</span></div>`).join("")}</div></div>
     <div class="panel cardwrap"><h3 style="margin-bottom:10px">回声档案卡</h3><canvas id="card" width="900" height="1350"></canvas><div class="actions"><button class="btn sm" id="dl">下载图片</button><button class="btn ghost sm" id="copy">复制文案</button><button class="btn ghost sm" id="again">再接一封信</button></div></div>`;
   drawCard(e, keys, lab);
   $("#dl").onclick = () => { const a = document.createElement("a"); a.download = `回声邮局-${e.card.title}-${e.card.no}.png`; a.href = $("#card").toDataURL("image/png"); a.click(); };
-  $("#copy").onclick = async () => { const txt = `【回声邮局 · 档案 No.${e.card.no}】\n我拆开了《${e.card.title}》——${e.card.from}的信。\n结局：${e.familyLabel} · ${e.depthLabel}\n回答人格：${e.persona.title}\n${e.card.quoteLabel}：「${e.quote}」\n五维：${keys.map(k => lab[k] + e.scores[k]).join(" / ")}\n#回声邮局 #知乎黑客松`; try { await navigator.clipboard.writeText(txt); toast("文案已复制"); } catch { toast("复制失败，请手动截图"); } };
+  $("#copy").onclick = async () => { const txt = `【回声邮局 · 档案 No.${e.card.no}】\n我拆开了《${e.card.title}》——${e.card.from}的信。\n结局：${e.familyLabel} · ${e.depthLabel}\n${e.evidence?.confirmed.label || "已确认真相数量未记录"}\n回答人格：${e.persona.title}\n${e.card.quoteLabel}：「${e.quote}」\n五维：${keys.map(k => lab[k] + e.scores[k]).join(" / ")}\n#回声邮局 #知乎黑客松`; try { await navigator.clipboard.writeText(txt); toast("文案已复制"); } catch { toast("复制失败，请手动截图"); } };
   $("#again").onclick = () => { sessionStorage.removeItem("echo.state"); renderHome(); };
 }
 function drawCard(e, keys, lab) {
@@ -470,7 +536,7 @@ function drawCard(e, keys, lab) {
     ctx.font = `26px ${sans}`; ctx.fillStyle = amber; ctx.fillText("回答人格", 90, 365);
     ctx.font = `700 58px ${serif}`; ctx.fillStyle = ink; ctx.fillText(e.card.persona, 90, 400);
     ctx.font = `26px ${sans}`; ctx.fillStyle = amber; ctx.fillText("结局", 90, 495);
-    wrap(`${e.familyLabel} · ${e.depthLabel} · 真相 ${e.card.truths}`, 90, 530, W - 180, 40, `32px ${serif}`, ink, 2);
+    wrap(`${e.familyLabel} · ${e.depthLabel} · ${e.evidence?.confirmed.label || "已确认数量未记录"}`, 90, 530, W - 180, 40, `32px ${serif}`, ink, 2);
     ctx.font = `26px ${sans}`; ctx.fillStyle = amber; ctx.fillText(e.card.quoteLabel, 90, 620);
     let y = wrap(`「${e.quote}」`, 90, 660, W - 180, 52, `36px ${serif}`, ink, 4);
     y = Math.max(y + 20, 820);
@@ -486,9 +552,8 @@ statusEl.textContent = "连接邮局…";
 (async () => {
   try {
     const h = await api("/api/health");
-    if (h.budget?.mode === "classic") {
-      const notice = $("#api-budget-notice"); notice.hidden = false; notice.textContent = h.budget.message;
-    }
+    const notice = $("#api-budget-notice"); notice.hidden = false; notice.textContent = modeDescription(h);
+    $("#mode-details-text").textContent = h.budget?.message || '来源以每张卡片、每段回复的标注为准；配置状态不代表调用成功。';
     const configured = h.capabilities?.credentialsConfigured, llm = h.llm !== "none";
     statusEl.className = "status " + (llm ? "live" : "demo");
     statusEl.innerHTML = `<span class="dot"></span>知乎参考台 · AI：${h.llm === "zhida" ? "直答已配置" : h.llm === "deepseek" ? "DeepSeek 已配置" : h.llm === "openai" ? "兼容模型已配置" : "规则引擎"}`;
@@ -512,3 +577,16 @@ statusEl.textContent = "连接邮局…";
 })();
 $("#brand").onclick = e => { e.preventDefault(); if (S.view !== "home" && !confirm("回到门厅会放下这封信，确定吗？")) return; sessionStorage.removeItem("echo.state"); renderHome(); };
 
+
+const resourceDescriptions = {
+  summons: '可邀请角色：邀请一位新角色消耗 1 次；切回已邀请角色和开场白免费。',
+  stamps: '提问邮票：服务器成功受理一条新提问消耗 1 枚；编辑不扣，重复请求不重复扣。',
+  unlock: '档案提示：动用一次邮局档案可确认一层线索；这与免费邮差提示不同。',
+  revise: '改稿机会：正式评估后可修改一次；结局后的平行试写免费，不覆盖档案。'
+};
+document.querySelectorAll('[data-resource]').forEach(button => button.onclick = () => {
+  const help = $("#resource-help"), open = button.getAttribute('aria-expanded') !== 'true';
+  document.querySelectorAll('[data-resource]').forEach(b => b.setAttribute('aria-expanded','false'));
+  button.setAttribute('aria-expanded', String(open)); help.hidden = !open;
+  help.textContent = open ? resourceDescriptions[button.dataset.resource] : '';
+});

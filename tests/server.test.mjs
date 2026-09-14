@@ -114,6 +114,9 @@ test("完整单局：拆信 → 寻声(SSE) → 落笔(SSE) → 回响(SSE)", as
   assert.equal(ask.last.done.generated, true, "mock 可用时应标记为模型生成");
   assert.equal(ask.last.done.session.talks.at(-1).generated, true, "恢复会话时仍保留真实生成来源");
   assert.ok(ask.last.done.text.includes("模型生成"), "展示文本应为模型输出");
+  assert.deepEqual(ask.last.done.receipt, ask.last.done.session.talks.at(-1).receipt);
+  assert.equal(ask.last.done.receipt.stamps.delta, -1);
+  assert.equal(ask.last.done.receipt.newTruths[0].id, "t1");
   assert.equal(ask.last.done.truth.id, "t1", "真相判定由引擎负责，与 LLM 无关");
   assert.equal(ask.last.done.session.truthsUnlocked.length, 1);
 

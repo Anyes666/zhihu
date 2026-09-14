@@ -116,7 +116,7 @@ async function handleRequest(req, res) {
           const char = E.CHARACTERS[charId];
           const sessionTalk = s.talks[s.talks.length - 1];
           const { generated } = await streamCharacterReply({ send, session: s, letter, char, talk: sessionTalk, question: normalized });
-          const done = { text: sessionTalk.a, generated, truth: talk.truth, session: E.publicState(s) };
+          const done = { text: sessionTalk.a, generated, truth: talk.truth, receipt: talk.receipt, session: E.publicState(s) };
           s.askReplay = { charId, question: normalized, meta: structuredClone(meta), done };
           send("done", done);
           return res.end();

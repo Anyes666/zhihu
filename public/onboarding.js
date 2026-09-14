@@ -1,49 +1,105 @@
-// 首次值班：状态由实际业务成功后的快照驱动，不自动触发游戏操作。
+// 引导只持久化自己的元数据，不读取或写入游戏、草稿和资源。
+// 保留旧键，v1 的退出选择与已读步骤迁入 v2，不强制旧玩家补练习。
 const KEY = 'echo.guide.v1';
-const fresh = () => ({ version: 1, status: 'new', seen: [], sid: null });
+const fresh = () => ({ version: 2, status: 'new', seen: [], sid: null, practice: 'pending' });
 export function restoreGuide(raw) {
   try {
     const s = JSON.parse(raw);
-    if (s?.version === 1 && ['new', 'active', 'skipped', 'complete'].includes(s.status))
-      return { version: 1, status: s.status, seen: Array.isArray(s.seen) ? s.seen.filter(x => typeof x === 'string') : [], sid: typeof s.sid === 'string' ? s.sid : null };
+    if ([1, 2].includes(s?.version) && ['new', 'active', 'skipped', 'complete'].includes(s.status)) {
+      return {
+        version: 2, status: s.status,
+        seen: Array.isArray(s.seen) ? s.seen.filter(x => typeof x === 'string') : [],
+        sid: typeof s.sid === 'string' ? s.sid : null,
+        practice: s.version === 2 && ['pending', 'complete', 'skipped'].includes(s.practice)
+          ? s.practice : s.status === 'new' ? 'pending' : 'skipped',
+      };
+    }
   } catch {}
   return fresh();
 }
-const step = (id, target, title, text, action, chapter) => ({ id, target, title, text, action, chapter });
+
+// 独立原创例句；不得导入正式来信或把练习结果交给游戏业务。
+export const PRACTICE_SENTENCES = [
+  { id: 'practice-fact', text: '今天下午，我把两本借来的图册放回了书架。', category: 'fact', reason: '归还图册的时间、数量和动作可以核对，是可核实的陈述。' },
+  { id: 'practice-emotion', text: '想到明天要第一次参加合唱排练，我有些紧张。', category: 'emotion', reason: '这句话主要在表达「紧张」这一主观感受，而不是报告可核实的行动。' },
+];
+export const CATEGORY_HELP = [
+  { id: 'fact', label: '事实', explanation: '可以核对的经历或行动；可核实不等于已经证实。', example: '我把两本图册放回了书架。' },
+  { id: 'emotion', label: '情绪', explanation: '当事人的主观感受，不需要用对错否定它。', example: '第一次参加合唱排练，我有些紧张。' },
+  { id: 'demand', label: '诉求', explanation: '想得到的帮助、改变或被满足的需要。', example: '我希望练习前有人带我熟悉节奏。' },
+  { id: 'bias', label: '偏见', explanation: '把有限经历当成普遍结论，或未经核实就替别人下判断。', example: '节奏跟不上的人肯定都不认真。' },
+  { id: 'avoidance', label: '逃避', explanation: '为了躲开不适，回避要面对的问题或行动。', example: '我干脆不看排练通知，就不用面对出错了。' },
+  { id: 'clue', label: '关键线索', explanation: '可能改变理解、值得继续追问的具体细节；仍需结合上下文核实。', example: '通知写着排练在二楼，门上的纸条却写三楼，值得问清原因。' },
+];
+export const freshPractice = () => ({ selected: null, completed: [], feedback: null });
+export function practiceAction(state, event) {
+  if (event.type === 'restart') return freshPractice();
+  if (event.type === 'select') {
+    if (!PRACTICE_SENTENCES.some(s => s.id === event.id) || state.completed.includes(event.id)) return state;
+    return { ...state, selected: event.id, feedback: null };
+  }
+  if (event.type !== 'classify' || !['fact', 'emotion'].includes(event.category)) return state;
+  const sentence = PRACTICE_SENTENCES.find(s => s.id === state.selected);
+  if (!sentence || state.completed.includes(sentence.id)) return state;
+  const correct = sentence.category === event.category;
+  return {
+    selected: correct ? null : state.selected,
+    completed: correct ? [...state.completed, sentence.id] : [...state.completed],
+    feedback: { correct, message: `${correct ? '分对了：' : '再试一次：'}${sentence.reason}${correct ? '' : '保留这句，再选一个类别即可重试。'}` },
+  };
+}
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+export function practiceMarkup(state) {
+  const selected = PRACTICE_SENTENCES.find(s => s.id === state.selected);
+  return `<p class="practice-progress">已完成 ${state.completed.length} / 2 · 不计分、不使用游戏资源</p>
+    <div class="practice-sentences" role="group" aria-label="先点一句练习句子">${PRACTICE_SENTENCES.map(s => `<button type="button" data-practice-sentence="${s.id}" aria-pressed="${state.selected === s.id}" ${state.completed.includes(s.id) ? 'disabled' : ''}>${esc(s.text)}${state.completed.includes(s.id) ? '<span>已完成</span>' : ''}</button>`).join('')}</div>
+    <p id="guide-practice-selected">${selected ? `已选：「${esc(selected.text)}」` : state.completed.length === 2 ? '两句练习已完成，可以继续或重玩。' : '先点一句，再选择下面的类别。'}</p>
+    <fieldset id="guide-practice-categories" ${selected ? '' : 'disabled'}><legend>把已选句子分到哪一类？</legend>${CATEGORY_HELP.slice(0, 2).map(c => `<button type="button" data-practice-category="${c.id}">${c.label}</button>`).join('')}</fieldset>
+    <p id="guide-practice-feedback" role="status" aria-live="polite" aria-atomic="true" data-result="${state.feedback ? state.feedback.correct ? 'correct' : 'incorrect' : 'none'}">${esc(state.feedback?.message || '')}</p>`;
+}
+
+// 保留 id/target/title/text/action/chapter，新增显式三段字段供集成方读取。
+const step = (id, target, goal, instruction, outcome, action, chapter, note = '') => ({
+  id, target, title: goal, text: `当前目标：${goal}。具体动作：${instruction}。完成后：${outcome}。${note}`,
+  action, chapter, goal, instruction, outcome, note,
+});
 export function guideStep(c, s) {
-  if (s.status === 'new') return step('welcome', '#start-shift', '今晚，我陪你值第一班。', '先听，再判断，最后亲手回信。引导不替你选答案、不消耗机会；你可以随时跳过，也能从右下角重新开启。', '开始陪伴引导', '首次值班');
+  if (s.status === 'new') return step('welcome', '#start-shift', '读懂一封来信，亲手回应', '点击「试做两句练习」，也可自己探索', '先练习区分事实与情绪，再进入正式故事', '试做两句练习', '首次值班', '完整版在页面底部「游戏介绍与玩法」，按需展开即可。无需登录，练习不联网、不计分。');
   if (s.status !== 'active' || c.busy) return null;
+  if (s.practice === 'pending') return step('practice', '#guide-practice', '先分清事实和感受', '先点一句原创练习句，再点事实或情绪', '立即看到一句理由；分错可重试，不影响正式故事', null, '独立练习 · 可跳过');
   const seen = id => s.seen.includes(id);
   switch (c.view) {
-    case 'home': if (!seen('introduction')) return step('introduction', '#game-intro-content', '先花半分钟，了解这间邮局', '已为你展开页面底部的游戏介绍。你将拆信、寻声、落笔、读回响；先了解玩法，再挑一封信。登录和查资料都可选。', '了解了，去选一封信', '启程 · 游戏介绍'); return step('home', '#start-shift', '选一个你愿意认真听的人', '点击「接过第一封信」，也可以往下挑另一封。没有必须选择的故事。', null, '启程');
+    case 'home':
+      if (!seen('introduction')) return step('introduction', '#game-intro-content', '先听，再判断，最后回信', '点击「去选一封信」；需要时再展开底部「游戏介绍与玩法」', '进入选信，不必重复阅读介绍', '去选一封信', '启程 · 玩法摘要');
+      return step('home', '#start-shift', '选一封你愿意认真听的信', '点击「接过第一封信」，或另选一封来信', '展开这封信，开始阅读', null, '启程');
     case 'read': return seen('read')
-      ? step('read-next', '#go-sort', '读完后，开始拆信', '先不用决定该劝他做什么。下一步只分清：发生了什么，和他怎么看这件事。', null, '1 / 4 · 拆信')
-      : step('read', '.read .paper h2', '先把这封信读完', '留意一句让你在意的话：它是在描述事实，还是在表达害怕？你现在的第一反应，也可以等到结尾再看一眼。', '读好了，下一步', '1 / 4 · 拆信');
+      ? step('read-next', '#go-sort', '把来信拆成可以理解的句子', '点击「开始拆信」', '进入六类分类区，尚不提交判断', null, '1 / 4 · 拆信')
+      : step('read', '.read .paper h2', '先把这封信读完', '读完来信，再点「读好了，下一步」', '看到开始拆信的入口；不会替你选答案', '读好了，下一步', '1 / 4 · 拆信');
     case 'sort':
-      if (c.sortDone) return step('sort-done', '#go-talk', '分类不是为了给人贴标签', '看看哪些判断被纠正了。接下来可以向不同立场的人追问；你还不知道的事，可能比第一眼的结论重要。', null, '1 / 4 · 拆信');
-      if (c.assigned === c.total && c.total > 0) return step('sort-seal', '#seal', '把你的理解交给邮局', '所有句子已归位。点击封存后才能看到反馈；现在仍可点分类里的小标签撤回修改。', null, '1 / 4 · 拆信');
-      if (c.selected) return step('sort-place', '#trays', '再选一个合适的分类框', `${c.selectedText ? '已选：「' + c.selectedText.slice(0, 48) + (c.selectedText.length > 48 ? '…' : '') + '」。' : ''}看看六类的解释，点击你认为合适的框。分错也能继续故事。`, null, '1 / 4 · 拆信');
-      return step('sort-pick', '.frag:not(.placed)', c.assigned ? '继续整理剩下的话' : '先点一句话', '点一句，再点分类框；也支持拖放。事实是可核对的经历，情绪是感受——“我觉得”不一定就是事实。', null, '1 / 4 · 拆信');
+      if (c.sortDone) return step('sort-done', '#go-talk', '看看分类反馈，再找人追问', '阅读纠正理由，点击「去寻声」', '进入角色选择，继续了解不同立场', null, '1 / 4 · 拆信');
+      if (c.assigned === c.total && c.total > 0) return step('sort-seal', '#seal', '提交这一轮分类', '点击「封存」；提交前仍可点击已分类标签撤回', '显示分类反馈，之后可以去寻声', null, '1 / 4 · 拆信');
+      if (c.selected) return step('sort-place', '#sort-selection', '给选中的句子分类', '在完整选句下，点击你认为合适的类别', '句子进入该类，已分类数量增加；仍可撤回', null, '1 / 4 · 拆信');
+      return step('sort-pick', '.frag:not(.placed)', c.assigned ? '继续整理剩下的句子' : '选一句话来判断', '点击一条尚未归类的句子', '完整选句会显示在分类区上方，再选择类别', null, '1 / 4 · 拆信');
     case 'talk':
-      if (!c.summoned) return step('cast', '.card[data-char]', '选一个人，给他留个座位', '圈出的是一个入口，四位都可以选。召唤用一次机会，开场白免费；不要急着把任何一人的立场当成全部真相。', null, '2 / 4 · 寻声');
-      if (!c.talks && c.stamps > 0) return step('ask', '.compose', '问一句你真的想知道的话', '可以自由输入，也可点上方开口提示再修改。只有按「提问」才消耗 1 枚邮票。温和或具体的问法，可能让对方愿意多说。', null, '2 / 4 · 寻声');
-      if (c.talks > 0 && !seen('listen')) return step('listen', '#msgs', '先听完，别急着找正确答案', '这是对你刚才问法的回应。看看对方的语气与线索变化；也可以继续问、换角色，或动用一次邮局档案。没问出真相不等于不能写好回信。', '我听到了', '2 / 4 · 寻声');
+      if (!c.summoned) return step('cast', '.card[data-char]', '找一个人了解另一面', '点击一张角色卡，邀请他入座', '使用一次邀请机会，先听免费开场白', null, '2 / 4 · 寻声');
+      if (!c.talks && c.stamps > 0) return step('ask', '.compose', '问清一件你还不知道的事', '输入具体问题，点击「提问」发送', '发送成功后使用 1 枚邮票，收到角色回应', null, '2 / 4 · 寻声');
+      if (c.talks > 0 && !seen('listen')) return step('listen', '#msgs', '看见这次提问带来的变化', '读刚收到的回答，看看语气和线索，再点「我听到了」', '可继续追问、换人，或前往参考台', '我听到了', '2 / 4 · 寻声');
       if (!seen('research')) return c.researchOpen
-        ? step('sources', '.research-desk > summary', '他人的经验，不是这个人的证据', '可以选一张知乎来源卡，记下启发与不适用之处。来源以页面标记为准；演示不是实时内容。查不到也没关系，不加分、不扣邮票。', '了解了，继续自由查阅', '2 / 4 · 知乎参考（可选）')
-        : step('research', '#open-research', '去知乎找一个不同的视角', '点击参考台，看看哪些经验能提醒你、哪些不能照搬。查阅与写笔记都可选，不影响你继续回信。', '这次先不查', '2 / 4 · 知乎参考（可选）');
-      return step('to-write', '#go-write', '准备好了，就把回应写给他', '你仍可继续对话或查资料。落笔后不能返回寻声；决定寄出前，想想还有什么是你需要问清的。', null, '2 / 4 · 寻声');
+        ? step('sources', '.research-desk > summary', '借鉴经验，但不把它当本案证据', '按需查看来源与适用边界，再点「继续」', '回到自由调查；查不到也不影响回信', '继续', '2 / 4 · 知乎参考（可选）', '来源以页面标记为准，演示不是实时内容。')
+        : step('research', '#open-research', '选择是否参考他人经验', '点击参考台查看来源，或点「这次先不查」', '得到参考视角或直接继续；不会扣提问邮票', '这次先不查', '2 / 4 · 知乎参考（可选）');
+      return step('to-write', '#go-write', '准备好后再开始回信', '确认没有要追问的问题，再点击「去落笔」', '进入回信页；落笔后不能返回寻声', null, '2 / 4 · 寻声');
     case 'write': return c.reviewReady
-      ? step('review', '#to-echo', '反馈是一面镜子，不是判决', '看看你的话是否贴合已知事实、是否留下余地。你可以用一次改稿机会，也可以直接去看一个月后的回响。', null, '3 / 4 · 落笔')
-      : step('write', '#reply', '不是写满分答案，是回应一个人', '试着写下：你听见的一件事、理解的一种感受、今天能做的一件小事。不确定的部分请留白。至少 10 字可寄出；不会替你写。', '留点安静给我', '3 / 4 · 落笔');
+      ? step('review', '#to-echo', '对照反馈，决定是否改稿', '阅读反馈，按需改稿，或点击「去看回响」', '查看寄信人一个月后的可能结局', null, '3 / 4 · 落笔')
+      : step('write', '#reply', '用自己的话回应一个人', '写下听见的事实、理解的感受和可做的小事；至少 10 字可寄出', '寄出后收到反馈；不会替你写，也不要求满分答案', '留点安静给我', '3 / 4 · 落笔');
     case 'echo':
       if (!c.endingReady) return null;
       return !seen('ending')
-        ? step('ending', '#narr', '先看这个人，后来怎样了', '这是游戏里的可能结局，不是现实预测。先读完他的一个月，再去看赞同与评论——热闹和真正帮到人，不总是一回事。', '回看我的这封信', '4 / 4 · 回响')
-        : step('reflection', '#first-reflection h2', '第一次值班，最后留一个问题', '回看看过的事实、问过的问题，以及你留下的那句话。如果再来一次，你会先问什么？下方「平行试写」可比较另一种回应，不改正式结局。', '完成首次值班', '4 / 4 · 留下回声');
+        ? step('ending', '#narr', '看这封回应带来的可能回响', '读完一个月后的叙述，点击「回看我的这封信」', '回顾本局提问与回信，而非预测现实人生', '回看我的这封信', '4 / 4 · 回响')
+        : step('reflection', '#first-reflection h2', '带走一个下次愿意问的问题', '回看自己的提问和表达，再点「完成首次值班」', '结束引导；仍可平行试写，不改正式结局', '完成首次值班', '4 / 4 · 留下回声');
     default: return null;
   }
 }
-const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
 export function reflectionMarkup(session, ending) {
   const talks = session?.talks || [], truths = session?.truthsUnlocked || [], missed = ending?.missed || [];
   const last = talks.at(-1);
@@ -58,74 +114,187 @@ export function reflectionMarkup(session, ending) {
 }
 
 export function mountGuide() {
-  let state, context = {}, current, target, collapsed = false, memoryOnly = false, previousFocus;
+  let state, context = {}, current, collapsed = false, memoryOnly = false;
+  let practice = freshPractice(), practiceReplay = false, visibility = '';
   try { state = restoreGuide(localStorage.getItem(KEY)); } catch { state = fresh(); memoryOnly = true; }
   const root = document.createElement('div'); root.id = 'first-guide';
-  root.innerHTML = `<div class="guide-ring" hidden></div><section class="guide-card" hidden role="region" aria-labelledby="guide-title"><div class="guide-topline"><span id="guide-chapter"></span><button type="button" id="guide-collapse" aria-label="收起提示，稍后继续">收起</button></div><h2 id="guide-title" tabindex="-1"></h2><p id="guide-text"></p><small id="guide-storage" hidden>浏览器无法保存进度；本次可用，关闭页面后可能再次提示。</small><div class="guide-actions"><button class="btn sm" id="guide-next"></button><button class="btn ghost sm" id="guide-skip">跳过引导</button></div><span class="guide-note">只圈选，不限制其他操作 · Esc 收起</span></section><button class="guide-help" type="button" id="guide-help">新手指引</button><span class="sr-only" id="guide-announcement" role="status" aria-live="polite"></span>`;
-  document.body.appendChild(root);
+  root.innerHTML = `<div class="guide-ring" hidden aria-hidden="true"></div>
+    <section class="guide-card" hidden role="region" aria-labelledby="guide-title">
+      <div class="guide-topline"><span id="guide-chapter"></span><button type="button" id="guide-collapse" aria-label="收起提示，稍后继续">收起</button></div>
+      <h2 id="guide-title"></h2><p id="guide-text"></p><p id="guide-note" hidden></p>
+      <div id="guide-practice" hidden>${practiceMarkup(practice)}</div>
+      <small id="guide-storage" hidden>浏览器无法保存引导进度；本次仍可练习，关闭页面后可能再次提示。</small>
+      <div class="guide-actions"><button type="button" class="btn sm" id="guide-next"></button><button type="button" class="btn ghost sm" id="guide-practice-skip" hidden>跳过练习</button><button type="button" class="btn ghost sm" id="guide-skip">跳过引导</button></div>
+    </section>
+    <div class="guide-tools"><button class="guide-help" type="button" id="guide-help">新手指引</button><button class="guide-help" type="button" id="guide-practice-replay">重玩两句练习</button>
+      <details id="guide-category-help"><summary>六类帮助 · 解释与例子</summary><div class="guide-category-grid">${CATEGORY_HELP.map(c => `<article data-guide-category="${c.id}"><h3>${c.label}</h3><p>${esc(c.explanation)}</p><p><b>例：</b>${esc(c.example)}</p></article>`).join('')}</div></details>
+    </div><span class="sr-only" id="guide-announcement" role="status" aria-live="polite"></span>`;
+  const app = document.querySelector('#app');
+  if (app) app.parentNode.insertBefore(root, app); else document.body.appendChild(root);
   const $ = selector => root.querySelector(selector), card = $('.guide-card'), ring = $('.guide-ring'), help = $('#guide-help');
   const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { memoryOnly = true; } $('#guide-storage').hidden = !memoryOnly; };
-  const restoreFocus = () => { if (root.contains(document.activeElement)) { const next = previousFocus?.isConnected && !root.contains(previousFocus) ? previousFocus : target?.querySelector('button,input,textarea') || target; if (next instanceof HTMLElement && !next.disabled) next.focus({preventScroll:true}); else help.focus({preventScroll:true}); } };
-  const clear = () => { restoreFocus(); card.hidden = true; ring.hidden = true; document.body.classList.remove('guide-visible'); help.hidden = false; };
-  function position(scroll = false) {
-    if (card.hidden) return;
-    const vv = window.visualViewport, width = vv?.width || innerWidth, height = vv?.height || innerHeight, offsetY = vv?.offsetTop || 0;
-    const mobile = width <= 760;
-    const compact = mobile && height < 680; card.classList.toggle('guide-compact', compact);
-    $('#guide-text').textContent = compact && current?.id === 'sort-place' ? '点选合适的分类；所有六类都可选。可收起提示查看原句。' : current?.text || '';
-    const cardHeight = card.offsetHeight;
-    document.documentElement.style.setProperty('--guide-viewport-height', `${height}px`);
-    document.documentElement.style.setProperty('--guide-space', mobile ? `${cardHeight + 28}px` : '0px');
-    card.style.left = mobile ? '12px' : `${Math.max(12, width - card.offsetWidth - 24)}px`;
-    card.style.top = `${offsetY + Math.max(12, height - cardHeight - (mobile ? 12 : 24))}px`;
-    target = current?.target ? document.querySelector(current.target) : null;
-    if (!target || !target.getClientRects().length) { ring.hidden = true; return; }
-    if (scroll) {
-      const top = document.querySelector('.top')?.getBoundingClientRect().bottom || 60;
-      const r = target.getBoundingClientRect(), available = height - cardHeight - top - 42;
-      const desired = Math.max(top + 18, top + available / 2 - Math.min(r.height, available) / 2);
-      window.scrollBy({top:r.top - desired,behavior:'instant'});
+  const markSeen = id => { state.seen = [...new Set([...state.seen, id])]; };
+  function announceVisibility(visible) {
+    document.body.classList.toggle('guide-visible', visible);
+    const key = `${visible}:${visible ? current?.id : ''}`;
+    if (key === visibility) return;
+    visibility = key;
+    // 集成方可隐藏重复的主提示，不传递练习答案或触发游戏操作。
+    document.dispatchEvent(new CustomEvent('guide:visibility', { detail: { visible, step: visible ? current?.id : null } }));
+  }
+  function clear() {
+    card.hidden = true; ring.hidden = true; help.hidden = false;
+    announceVisibility(false);
+  }
+  function park() {
+    if (app && (root.parentNode !== app.parentNode || root.nextSibling !== app)) app.parentNode.insertBefore(root, app);
+  }
+  function place(next) {
+    // 就近放在稳定容器；分类选句/归类循环始终用同一位置，不逐句搬动。
+    // 当玩家正在操作引导本身时，不搬动持有焦点的子树。
+    if (root.contains(document.activeElement) || next.id === 'practice' || next.id === 'welcome') return;
+    if (context.view === 'home') { park(); return; }
+    if (context.view === 'sort' && !context.sortDone) {
+      const trays = document.querySelector('#trays');
+      if (trays && root.parentNode !== trays) trays.insertBefore(root, trays.firstChild);
+      return;
     }
-    const r = target.getBoundingClientRect(), top = Math.max(offsetY + 6, r.top - 5), bottom = Math.min(offsetY + height - 6, r.bottom + 5);
-    ring.hidden = bottom <= top || r.right <= 0 || r.left >= width;
-    Object.assign(ring.style, { left: `${Math.max(4, r.left - 5)}px`, top: `${top}px`, width: `${Math.max(0,Math.min(width-4,r.right+5)-Math.max(4,r.left-5))}px`, height: `${Math.max(0,bottom-top)}px` });
-    // Desktop: when a right-side control is highlighted, move the card to the left.
-    if (!mobile) { const cr = card.getBoundingClientRect(); if (r.right > cr.left && r.left < cr.right && r.bottom > cr.top && r.top < cr.bottom) card.style.left = '24px'; }
+    const selector = next.id === 'cast' ? '#cast' : next.target;
+    const target = document.querySelector(selector);
+    if (!target || root.contains(target)) return;
+    if (next.id === 'cast') {
+      if (root.parentNode !== target) target.insertBefore(root, target.firstChild);
+    } else if (root.parentNode !== target.parentNode || root.nextSibling !== target) {
+      target.parentNode.insertBefore(root, target);
+    }
+  }
+  function position() {
+    if (card.hidden || current?.id === 'practice') { ring.hidden = true; return; }
+    // 只画无交互边框：不移动卡片、不滚动页面，也不改焦点。
+    const target = current?.target && (document.querySelector(current.target)
+      || (current.id === 'sort-place' ? document.querySelector('#trays') : null));
+    if (!target || !target.getClientRects().length) { ring.hidden = true; return; }
+    const vv = window.visualViewport, width = vv?.width || window.innerWidth;
+    const height = vv?.height || window.innerHeight, offsetY = vv?.offsetTop || 0;
+    const r = target.getBoundingClientRect(), top = Math.max(offsetY + 6, r.top - 5);
+    const bottom = Math.min(offsetY + height - 6, r.bottom + 5);
+    const left = Math.max(4, r.left - 5), right = Math.min(width - 4, r.right + 5);
+    ring.hidden = bottom <= top || right <= left;
+    Object.assign(ring.style, { left: `${left}px`, top: `${top}px`, width: `${Math.max(0, right-left)}px`, height: `${Math.max(0, bottom-top)}px` });
+  }
+  function renderPractice() {
+    // 更新现有节点而非替换 innerHTML：错误重试保留按钮焦点与 live region。
+    for (const sentence of PRACTICE_SENTENCES) {
+      const button = $(`[data-practice-sentence="${sentence.id}"]`), done = practice.completed.includes(sentence.id);
+      button.disabled = done;
+      button.setAttribute('aria-pressed', String(practice.selected === sentence.id));
+      button.textContent = `${sentence.text}${done ? ' · 已完成' : ''}`;
+    }
+    const selected = PRACTICE_SENTENCES.find(s => s.id === practice.selected);
+    $('#guide-practice-selected').textContent = selected ? `已选：「${selected.text}」`
+      : practice.completed.length === 2 ? '两句练习已完成，可以继续或重玩。' : '先点一句，再选择下面的类别。';
+    $('#guide-practice-categories').disabled = !selected;
+    $('.practice-progress').textContent = `已完成 ${practice.completed.length} / 2 · 不计分、不使用游戏资源`;
+    const feedback = $('#guide-practice-feedback');
+    feedback.dataset.result = practice.feedback ? practice.feedback.correct ? 'correct' : 'incorrect' : 'none';
+    feedback.textContent = practice.feedback?.message || '';
   }
   function render() {
-    const next = guideStep(context,state);
+    let next = guideStep(context, practiceReplay ? { ...state, status: 'active', practice: 'pending' } : state);
     help.textContent = state.status === 'active' || state.status === 'new' ? '继续指引' : '新手指引';
-    if (document.querySelector('#zhihu-dialog')?.open) { clear(); help.hidden = true; return; }
+    const modalOpen = !!document.querySelector('#zhihu-dialog')?.open;
+    $('.guide-tools').hidden = modalOpen;
+    if (modalOpen) { clear(); return; }
     if (!next || collapsed || (next.id === 'write' && state.seen.includes('write'))) { current = next; clear(); return; }
-    const changed = current?.id !== next.id || card.hidden;
+    if (next.id === 'practice') {
+      const done = practice.completed.length === PRACTICE_SENTENCES.length;
+      next = { ...next,
+        goal: done ? '你已试过区分事实与感受' : practice.selected ? '给选中的练习句分类' : '先选一句练习句',
+        instruction: done ? '点击「继续正式引导」，或重玩两句' : practice.selected ? '点击下方「事实」或「情绪」' : '点击一条尚未完成的句子',
+        outcome: done ? '回到当前游戏阶段，游戏进度与资源不变' : practice.selected ? '立即看到理由，选错可原位重试' : '完整选句会显示在类别上方',
+        action: done ? '继续正式引导' : null,
+      };
+      renderPractice();
+    }
+    const changed = current?.id !== next.id || current?.instruction !== next.instruction || card.hidden;
     current = next;
-    if (next.id === 'introduction') { const intro = document.querySelector('#game-intro'); if (intro) intro.open = true; }
-    if (changed) previousFocus = document.activeElement;
-    card.hidden = false; help.hidden = true; document.body.classList.add('guide-visible'); card.dataset.step = next.id;
+    card.hidden = false; help.hidden = true; card.dataset.step = next.id;
     $('#guide-chapter').textContent = next.chapter;
-    $('#guide-title').textContent = next.title; $('#guide-text').textContent = next.text;
+    $('#guide-title').textContent = `当前目标：${next.goal}`;
+    $('#guide-text').textContent = `具体动作：${next.instruction}。完成后：${next.outcome}。`;
+    $('#guide-note').textContent = next.note; $('#guide-note').hidden = !next.note;
+    $('#guide-practice').hidden = next.id !== 'practice';
+    $('#guide-practice-skip').hidden = next.id !== 'practice';
     $('#guide-next').hidden = !next.action; $('#guide-next').textContent = next.action || '';
     $('#guide-skip').textContent = next.id === 'welcome' ? '自己探索' : '跳过引导';
     $('#guide-storage').hidden = !memoryOnly;
-    if (changed) $('#guide-announcement').textContent = `${next.chapter}。${next.title}。${next.text}`;
-    position(changed);
+    // 练习理由只由自身 live region 播报，不再叠加一条主提示。
+    if (changed && next.id !== 'practice') $('#guide-announcement').textContent = `${next.chapter}。${next.text}`;
+    place(next); announceVisibility(true); position();
   }
+  function finishPractice(status) {
+    practiceReplay = false; state.practice = status; markSeen('introduction'); persist(); render();
+    if (card.hidden) help.focus({ preventScroll: true });
+  }
+  $('#guide-practice').onclick = event => {
+    if (current?.id !== 'practice' || collapsed || card.hidden) return;
+    const sentence = event.target.closest('[data-practice-sentence]');
+    const category = event.target.closest('[data-practice-category]');
+    if (!sentence && !category) return;
+    const next = practiceAction(practice, sentence ? { type: 'select', id: sentence.dataset.practiceSentence }
+      : { type: 'classify', category: category.dataset.practiceCategory });
+    if (next === practice) return;
+    practice = next; render();
+    // 只有用户明确完成分类时，才接续键盘操作到下一句/继续按钮。
+    if (category && practice.feedback?.correct) {
+      const remaining = PRACTICE_SENTENCES.find(s => !practice.completed.includes(s.id));
+      (remaining ? $(`[data-practice-sentence="${remaining.id}"]`) : $('#guide-next')).focus({ preventScroll: true });
+    }
+  };
   $('#guide-next').onclick = () => {
     if (!current) return;
-    if (current.id === 'welcome') state.status = 'active';
-    else if (current.id === 'introduction') { state.seen = [...new Set([...state.seen, 'introduction'])]; const intro = document.querySelector('#game-intro'); if (intro) intro.open = false; }
-    else if (current.id === 'reflection') { state.status = 'complete'; $('#guide-announcement').textContent = '首次值班引导已完成。可以继续复盘或再接一封信。'; }
-    else state.seen = [...new Set([...state.seen, current.id === 'sources' ? 'research' : current.id])];
+    if (current.id === 'welcome') { state.status = 'active'; state.practice = 'pending'; markSeen('introduction'); }
+    else if (current.id === 'practice') { if (practice.completed.length === 2) finishPractice('complete'); return; }
+    else if (current.id === 'reflection') state.status = 'complete';
+    else markSeen(current.id === 'sources' ? 'research' : current.id);
+    const ownedFocus = card.contains(document.activeElement);
     persist(); render();
+    if (ownedFocus && card.hidden) help.focus({ preventScroll: true });
   };
-  $('#guide-skip').onclick = () => { state.status = 'skipped'; persist(); render(); $('#guide-announcement').textContent = '引导已跳过，游戏进度不变。右下角可以重新开启。'; };
-  const collapse = () => { collapsed = true; clear(); help.textContent = '继续指引'; help.focus({preventScroll:true}); };
+  $('#guide-practice-skip').onclick = () => { finishPractice('skipped'); if (card.hidden) help.focus({ preventScroll: true }); };
+  $('#guide-skip').onclick = () => {
+    practiceReplay = false; state.status = 'skipped'; persist(); render(); help.focus({ preventScroll: true });
+    $('#guide-announcement').textContent = '引导已跳过，游戏进度不变。页面上方「新手指引」可重新开启。';
+  };
+  const collapse = () => { collapsed = true; clear(); help.textContent = '继续指引'; help.focus({ preventScroll: true }); };
   $('#guide-collapse').onclick = collapse;
-  help.onclick = () => { previousFocus = document.activeElement; collapsed = false; if (state.status !== 'active' && state.status !== 'new') state = {...fresh(),status:'active',sid:context.sid || null}; state.seen = state.seen.filter(id => id !== 'write'); persist(); render(); if (!card.hidden) $('#guide-title').focus({preventScroll:true}); };
+  help.onclick = () => {
+    collapsed = false;
+    if (!practiceReplay && !['active', 'new'].includes(state.status)) state = { ...state, status: 'active', seen: ['introduction'], practice: state.practice === 'complete' ? 'complete' : 'skipped' };
+    state.seen = state.seen.filter(id => id !== 'write'); persist(); render();
+  };
+  const replayPractice = () => {
+    practice = practiceAction(practice, { type: 'restart' });
+    // 独立重玩不改已跳过/已完成的引导选择，刷新也不会强制恢复正式教学。
+    practiceReplay = true; collapsed = false; persist(); render();
+  };
+  $('#guide-practice-replay').onclick = replayPractice;
   document.addEventListener('echo:auth-modal', render);
-  document.addEventListener('keydown', event => { if (event.key === 'Escape' && !card.hidden) { event.preventDefault(); collapse(); } });
-  window.addEventListener('resize', () => position(true)); window.addEventListener('scroll', () => position(), {passive:true});
-  window.visualViewport?.addEventListener('resize', () => position()); window.visualViewport?.addEventListener('scroll', () => position());
-  const resize = new ResizeObserver(() => position()); resize.observe(document.querySelector('#app')); resize.observe(card);
-  return { sync(next) { context = next; if (next.sid && next.sid !== state.sid) { state.sid = next.sid; state.seen = []; persist(); } render(); }, suspend() { current = null; clear(); } };
+  document.addEventListener('keydown', event => {
+    // 不拦截游戏输入区的 Escape，只有提示自身持有焦点才处理。
+    if (event.key === 'Escape' && !card.hidden && card.contains(event.target)) { event.preventDefault(); collapse(); }
+  });
+  window.addEventListener('resize', position); window.addEventListener('scroll', position, { passive: true });
+  window.visualViewport?.addEventListener('resize', position); window.visualViewport?.addEventListener('scroll', position);
+  if (typeof ResizeObserver !== 'undefined') { const resize = new ResizeObserver(position); if (app) resize.observe(app); resize.observe(card); }
+  render();
+  return {
+    sync(next) {
+      context = next;
+      if (next.sid && next.sid !== state.sid) { state.sid = next.sid; state.seen = state.seen.filter(id => id === 'introduction'); persist(); }
+      render();
+    },
+    suspend() { current = null; clear(); park(); },
+    replayPractice,
+  };
 }

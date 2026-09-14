@@ -42,7 +42,12 @@ try {
     const box = await evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
     await call("Input.dispatchMouseEvent", { type: "mousePressed", ...box, button: "left", clickCount: 1 }); await call("Input.dispatchMouseEvent", { type: "mouseReleased", ...box, button: "left", clickCount: 1 });
   };
-  const fill = async (selector, value) => evaluate(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});el.value=${JSON.stringify(value)};el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  const fill = async (selector, value) => {
+    await click(selector);
+    await call('Input.dispatchKeyEvent',{type:'keyDown',key:'a',code:'KeyA',windowsVirtualKeyCode:65,modifiers:2});
+    await call('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',windowsVirtualKeyCode:65,modifiers:2});
+    await call('Input.insertText',{text:value});
+  };
   const screenshot = async (name, selector) => { if (selector) await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'start',behavior:'instant'})`); await sleep(250); const shot = await call("Page.captureScreenshot", { format: "png" }); await writeFile(path.join(output, name + ".png"), Buffer.from(shot.data, "base64")); };
   captureFailure = async () => { await screenshot("failure"); report.pageAtFailure = await evaluate('({text:document.body.innerText.slice(-4000),progress:document.querySelector("#prog-t")?.textContent})'); };
   const viewport = (width, height, mobile = false) => call("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile });
@@ -52,26 +57,34 @@ try {
   const hidden = () => evaluate('document.querySelector(".guide-card").hidden');
   const guideState = () => evaluate('JSON.parse(localStorage.getItem("echo.guide.v1"))');
   const inspect = async name => {
+    await evaluate(`(()=>{const c=document.querySelector('.guide-card');c.scrollIntoView({block:'start',behavior:'instant'});scrollBy(0,-(document.querySelector('.top').getBoundingClientRect().height+12))})()`);
     await sleep(250);
-    const boxes = await evaluate(`(()=>{const c=document.querySelector('.guide-card'),r=document.querySelector('.guide-ring');const rect=e=>{const b=e.getBoundingClientRect();return {left:b.left,right:b.right,top:b.top,bottom:b.bottom,width:b.width,height:b.height}};return {card:rect(c),ring:rect(r),ringHidden:r.hidden,width:innerWidth,height:innerHeight,scroll:document.documentElement.scrollWidth,step:c.dataset.step}})()`);
+    const boxes = await evaluate(`(()=>{const c=document.querySelector('.guide-card'),r=document.querySelector('.guide-ring');const rect=e=>{const b=e.getBoundingClientRect();return {left:b.left,right:b.right,top:b.top,bottom:b.bottom,width:b.width,height:b.height}};return {card:rect(c),ring:rect(r),ringHidden:r.hidden,width:innerWidth,height:innerHeight,scroll:document.documentElement.scrollWidth,position:getComputedStyle(c).position,step:c.dataset.step}})()`);
     assert.ok(boxes.scroll<=boxes.width, name+' horizontal overflow');
-    assert.ok(boxes.card.left>=0 && boxes.card.right<=boxes.width+1 && boxes.card.top>=0 && boxes.card.bottom<=boxes.height+1,name+' tooltip in viewport');
-    assert.equal(boxes.ringHidden,false,name+' spotlight target visible');
-    if(!boxes.ringHidden) {
-      const a=boxes.card,b=boxes.ring;
-      assert.ok(!(a.left<b.right && a.right>b.left && a.top<b.bottom && a.bottom>b.top), name+' highlighted target covered');
-    }
-    report.checks[name]=boxes;
-    await screenshot(name);
+    assert.ok(boxes.card.left>=0 && boxes.card.right<=boxes.width+1, name+' card width fits');
+    assert.ok(!['fixed','sticky','absolute'].includes(boxes.position),name+' card must not overlay actions');
+    report.checks[name]=boxes; await screenshot(name);
   };
   await call('Page.enable'); await call('Runtime.enable'); await viewport(390,844,true); await call('Page.navigate',{url:base});
   step('首次邀请 / 手机实际聚光 / 跳过后刷新不再弹出'); await guided('welcome'); await inspect('01-welcome-mobile');
   await click('#guide-skip'); assert.equal(await hidden(),true); assert.equal((await guideState()).status,'skipped');
   await call('Page.reload'); await waitFor('document.querySelector("#start-shift")'); assert.equal(await hidden(),true);
-  step('重开引导 / Escape收起与键盘恢复 / 不创建会话');
-  await evaluate('localStorage.removeItem("echo.guide.v1")'); await call('Page.reload'); await guided('welcome'); await click('#guide-next'); await guided('introduction'); await inspect('01b-introduction-mobile'); await viewport(320,568,true); await inspect('01c-introduction-short-mobile'); await evaluate('document.querySelector("#game-intro-content").scrollTop=10000'); assert.equal(await evaluate('(()=>{const e=document.querySelector("#game-intro-content");return Math.abs(e.scrollHeight-e.clientHeight-e.scrollTop)<2})()'),true); await viewport(390,844,true); assert.equal(await evaluate('document.querySelector("#game-intro").open'),true); await click('#guide-next'); await guided('home');
-  await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
-  await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+  step('两句独立练习 / 错误理由 / 离线重玩 / 320与390 / 不创建会话');
+  await evaluate('localStorage.removeItem("echo.guide.v1")'); await call('Page.reload'); await guided('welcome');
+  await click('#game-intro > summary'); assert.equal(await evaluate('document.querySelector("#game-intro").open'),true);
+  await click('#game-intro > summary'); await click('#guide-next'); await guided('practice');
+  assert.equal(await evaluate('JSON.parse(sessionStorage.getItem("echo.state"))?.sid || null'),null);
+  await call('Network.enable'); await call('Network.setBlockedURLs',{urls:['*/api/*']});
+  await click('[data-practice-sentence="practice-fact"]'); await click('[data-practice-category="emotion"]');
+  assert.equal(await evaluate('document.querySelector("#guide-practice-feedback").dataset.result'),'incorrect');
+  await inspect('01b-practice-wrong-mobile'); await viewport(320,568,true); await inspect('01c-practice-320');
+  await click('[data-practice-category="fact"]'); await click('[data-practice-sentence="practice-emotion"]');
+  await click('[data-practice-category="emotion"]'); assert.equal(await evaluate('document.querySelector("#guide-practice-feedback").dataset.result'),'correct');
+  await click('#guide-next'); await guided('home'); assert.equal((await guideState()).practice,'complete');
+  await click('#guide-practice-replay'); await guided('practice'); await click('#guide-practice-skip'); await guided('home');
+  assert.equal(await evaluate('JSON.parse(sessionStorage.getItem("echo.state"))?.sid || null'),null);
+  await call('Network.setBlockedURLs',{urls:[]}); await viewport(390,844,true);
+  step('收起引导 / 键盘恢复 / 不创建会话'); await click('#guide-collapse');
   assert.equal(await hidden(),true); assert.equal(await evaluate('document.activeElement.id'),'guide-help');
   await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r',unmodifiedText:'\r'});
   await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
@@ -85,8 +98,16 @@ try {
   let n=0;
   for(const [id,type] of Object.entries(assignments)) {
     await click(`.frag[data-id="${id}"]`); await guided('sort-place');
-    if(n===0) await inspect('04-sort-place-mobile');
-    await click(`.tray[data-cat="${type}"] h4`); n++;
+    if(n===0) {
+      await inspect('04-sort-place-mobile');
+      for (const [w,h] of [[320,568],[390,844]]) {
+        await viewport(w,h,true); await screenshot('04-selection-'+w,'#sort-selection');
+        assert.equal(await evaluate('document.querySelector("#sort-selection blockquote").textContent'), await evaluate('document.querySelector(".frag.selected .tx").textContent'));
+        assert.equal(await evaluate('document.querySelectorAll("#sort-selection [data-place]").length'),6);
+        assert.ok(await evaluate('document.documentElement.scrollWidth<=innerWidth'));
+      }
+    }
+    await click(`[data-place="${type}"]`); n++;
     if(n===3){await call('Page.reload');await guided('sort-pick');assert.equal(await evaluate('document.querySelectorAll(".frag.placed").length'),3);}
   }
   await guided('sort-seal'); await click('#seal'); await guided('sort-done'); await click('#go-talk'); await guided('cast'); await inspect('05-cast-mobile');

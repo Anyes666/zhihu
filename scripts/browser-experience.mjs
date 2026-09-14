@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 const ROOT = process.cwd(), sleep = ms => new Promise(r => setTimeout(r, ms));
 const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.on("error", reject); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => resolve(p)); }); });
 const temp = await mkdtemp(path.join(tmpdir(), "echo-research-browser-"));
-const output = path.join(ROOT, "artifacts", "experience-upgrade"); await mkdir(output, { recursive: true });
+const output = path.resolve(process.env.AUDIT_OUTPUT || path.join(ROOT, "artifacts", "experience-upgrade")); await mkdir(output, { recursive: true });
 const port = await freePort(), debug = await freePort(), base = `http://127.0.0.1:${port}`;
 const report = { at: new Date().toISOString(), steps: [], checks: {}, errors: [], llm: "none", authenticatedZhihu: false };
 let captureFailure, ws, server, chrome, currentStep = "startup";
@@ -132,7 +132,7 @@ try {
   const invalid = await evaluate(`fetch('/api/session/'+JSON.parse(sessionStorage.getItem('echo.state')).sid+'/rehearsal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:'短'})}).then(r=>r.status)`);
   assert.equal(invalid,400);
   await fill("#parallel-reply",reply); await click(".parallel-form button");
-  await waitFor('Number(document.querySelector(".parallel-deltas [data-dimension=safety]").dataset.delta) === 0');
+  await waitFor('Number(document.querySelector(".parallel-deltas [data-dimension=safety]")?.dataset.delta) === 0');
   assert.equal(await evaluate('[...document.querySelectorAll(".parallel-deltas [data-delta]")].every(el=>Number(el.dataset.delta)===0)'),true);
   assert.deepEqual(await state(),frozen);
   step("第二封信 / 参考资料不跨局串用"); await viewport(1440, 1000); await click("#again"); await click('.env[data-id="colleague"]'); await click("#go-sort");

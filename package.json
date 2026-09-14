@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check server.mjs && node --check lib/engine.mjs && node --check lib/zhihu.mjs && node --check lib/llm.mjs && node --check public/app.js && node --check lib/research.mjs && node --check public/research.js && node --check lib/rehearsal.mjs && node --check public/experience.js && node --check public/rehearsal.js && node --check public/onboarding.js && node --check lib/oauth.mjs && node --check lib/personalization.mjs && node --check public/auth.js && node --check lib/budget.mjs",
+    "check": "node --check server.mjs && node --check lib/engine.mjs && node --check lib/zhihu.mjs && node --check lib/llm.mjs && node --check public/app.js && node --check lib/research.mjs && node --check public/research.js && node --check lib/rehearsal.mjs && node --check public/experience.js && node --check public/rehearsal.js && node --check public/onboarding.js && node --check lib/oauth.mjs && node --check lib/personalization.mjs && node --check public/auth.js && node --check lib/budget.mjs && node --check public/investigation.js",
     "test": "node --test tests/*.test.mjs",
     "assets": "node scripts/gen-images.mjs",
     "test:browser:research": "node scripts/browser-research.mjs",
@@ -17,6 +17,8 @@
     "test:browser:onboarding": "node scripts/browser-onboarding.mjs",
     "test:browser:auth": "node scripts/browser-auth.mjs",
     "budget:status": "node scripts/budget-status.mjs",
-    "test:browser:budget": "node scripts/browser-budget.mjs"
+    "test:browser:budget": "node scripts/browser-budget.mjs",
+    "test:browser:gameplay": "node scripts/browser-gameplay.mjs",
+    "test:browser:recovery": "node scripts/browser-recovery.mjs"
   }
 }
